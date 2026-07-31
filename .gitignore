@@ -6,3 +6,11 @@ __pycache__/
 venv/
 *.log
 .DS_Store
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# VS Code
+.vscode/
