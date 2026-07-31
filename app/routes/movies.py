@@ -223,6 +223,8 @@ async def extract_movie_links(
     admin: dict = Depends(get_current_admin),
 ):
     """Extract download links for a movie. Admin only."""
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
     from app.services import DownloadExtractor
     
     db = get_database()
@@ -243,9 +245,14 @@ async def extract_movie_links(
             detail="Movie not found"
         )
     
-    # Run extraction
-    extractor = DownloadExtractor()
-    result = extractor.extract(movie["movie_url"], limit=limit)
+    # Run extraction in thread pool to avoid blocking async loop
+    def run_extraction():
+        extractor = DownloadExtractor()
+        return extractor.extract(movie["movie_url"], limit=limit)
+    
+    loop = asyncio.get_event_loop()
+    executor = ThreadPoolExecutor(max_workers=1)
+    result = await loop.run_in_executor(executor, run_extraction)
     
     if not result.success:
         raise HTTPException(
