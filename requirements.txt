@@ -11,9 +11,12 @@ fastapi>=0.100.0
 uvicorn[standard]>=0.22.0
 pydantic>=2.0.0
 
-# Database (SQLite built-in, PostgreSQL for production)
-sqlalchemy>=2.0.0
-psycopg2-binary>=2.9.0  # PostgreSQL driver
+# Database - MongoDB
+motor>=3.3.0  # Async MongoDB driver
+pymongo>=4.6.0  # MongoDB driver
+
+# Password hashing
+passlib[bcrypt]>=1.7.4
 
 # Authentication
 python-jose[cryptography]>=3.3.0

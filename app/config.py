@@ -14,13 +14,22 @@ class Settings:
     APP_VERSION: str = "2.0.0"
     APP_DESCRIPTION: str = "Extract download links from Arabic streaming websites (bypasses Cloudflare)"
     
-    # Authentication
-    API_KEY: str = os.getenv("API_KEY", "")  # Set via environment variable
+    # Database - MongoDB
+    MONGODB_URL: str = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+    DATABASE_NAME: str = os.getenv("DATABASE_NAME", "moviehub")
+    
+    # JWT Authentication
+    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRATION_HOURS: int = int(os.getenv("JWT_EXPIRATION_HOURS", "24"))
+    
+    # API Key (optional)
+    API_KEY: str = os.getenv("API_KEY", "")
     API_KEY_HEADER: str = "X-API-Key"
     AUTH_ENABLED: bool = os.getenv("AUTH_ENABLED", "false").lower() == "true"
     
     # CORS Settings
-    CORS_ORIGINS: List[str] = os.getenv("CORS_ORIGINS", "*").split(",")
+    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "*")
     
     # Extraction Settings
     MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "3"))

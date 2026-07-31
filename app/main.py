@@ -1,68 +1,67 @@
 """
-FastAPI application entry point.
+FastAPI Application - Movie Download Link Extractor API
+Using MongoDB for persistence.
 """
 
-import logging
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routes import extract_router, health_router, auth_router, movies_router
-from app.services import SELENIUMBASE_AVAILABLE
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+from app.database import connect_db, close_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application startup and shutdown events."""
-    from app.database import init_db
-    
-    logger.info(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} starting...")
-    logger.info(f"   SeleniumBase: {'✓' if SELENIUMBASE_AVAILABLE else '✗'}")
-    logger.info(f"   Auth Enabled: {'✓' if settings.AUTH_ENABLED else '✗'}")
-    
-    # Initialize database
-    logger.info("   Initializing database...")
-    init_db()
-    logger.info("   Database: ✓")
-    
+    """Application lifespan - connect/disconnect MongoDB."""
+    # Startup
+    await connect_db()
     yield
-    logger.info("👋 Shutting down...")
+    # Shutdown
+    await close_db()
 
 
 def create_app() -> FastAPI:
-    """Create and configure the FastAPI application."""
+    """Create and configure FastAPI application."""
     
     app = FastAPI(
         title=settings.APP_NAME,
-        description=settings.APP_DESCRIPTION,
-        version=settings.APP_VERSION,
+        description="API for extracting download links from movie streaming sites with Cloudflare bypass",
+        version="2.0.0",
         lifespan=lifespan,
     )
     
-    # CORS middleware
+    # CORS
+    origins = settings.CORS_ORIGINS.split(",") if settings.CORS_ORIGINS else ["*"]
+    
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS,
+        allow_origins=origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
     
     # Include routers
-    app.include_router(health_router)
-    app.include_router(auth_router)
-    app.include_router(movies_router)
-    app.include_router(extract_router)
+    from app.routes import extract, health, auth, movies
+    
+    app.include_router(health.router)
+    app.include_router(auth.router)
+    app.include_router(movies.router)
+    app.include_router(extract.router)
+    
+    @app.get("/")
+    async def root():
+        return {
+            "app": settings.APP_NAME,
+            "version": "2.0.0",
+            "database": "MongoDB",
+            "docs": "/docs",
+        }
     
     return app
 
 
+# Create app instance
 app = create_app()

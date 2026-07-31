@@ -1,18 +1,17 @@
 """
-MongoDB connection and database operations.
-Using Motor for async MongoDB operations.
+MongoDB connection using Motor (async driver).
 """
 
-import logging
+import os
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo import ASCENDING, DESCENDING
-from typing import Optional
-from app.config import settings
+from pymongo.server_api import ServerApi
 
-logger = logging.getLogger(__name__)
+# MongoDB connection string
+MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+DATABASE_NAME = os.getenv("DATABASE_NAME", "moviehub")
 
-# Global database client
-client: Optional[AsyncIOMotorClient] = None
+# Global client instance
+client: AsyncIOMotorClient = None
 db = None
 
 
@@ -20,21 +19,29 @@ async def connect_db():
     """Connect to MongoDB."""
     global client, db
     
+    print(f"Connecting to MongoDB...")
+    
+    client = AsyncIOMotorClient(
+        MONGODB_URL,
+        server_api=ServerApi('1'),
+        serverSelectionTimeoutMS=5000
+    )
+    
+    # Test connection
     try:
-        client = AsyncIOMotorClient(settings.MONGODB_URI)
-        db = client[settings.MONGODB_DB_NAME]
-        
-        # Test connection
         await client.admin.command('ping')
-        logger.info(f"✓ Connected to MongoDB: {settings.MONGODB_DB_NAME}")
-        
-        # Create indexes
-        await create_indexes()
-        
-        return db
+        print("✅ Connected to MongoDB!")
     except Exception as e:
-        logger.error(f"✗ Failed to connect to MongoDB: {e}")
-        raise
+        print(f"❌ MongoDB connection failed: {e}")
+        raise e
+    
+    db = client[DATABASE_NAME]
+    
+    # Create indexes
+    await db.users.create_index("email", unique=True)
+    await db.movies.create_index("created_at")
+    
+    return db
 
 
 async def close_db():
@@ -42,37 +49,9 @@ async def close_db():
     global client
     if client:
         client.close()
-        logger.info("MongoDB connection closed")
+        print("MongoDB connection closed")
 
 
-async def create_indexes():
-    """Create database indexes for better performance."""
-    global db
-    
-    # Users indexes
-    await db.users.create_index("email", unique=True)
-    await db.users.create_index("username", unique=True)
-    
-    # Movies indexes
-    await db.movies.create_index("name")
-    await db.movies.create_index("created_at", DESCENDING)
-    await db.movies.create_index([("name", "text"), ("name_ar", "text")])
-    
-    logger.info("Database indexes created")
-
-
-def get_db():
+def get_database():
     """Get database instance."""
-    global db
     return db
-
-
-# Collections helpers
-def get_users_collection():
-    """Get users collection."""
-    return db.users
-
-
-def get_movies_collection():
-    """Get movies collection."""
-    return db.movies

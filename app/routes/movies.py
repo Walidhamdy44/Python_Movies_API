@@ -1,46 +1,55 @@
 """
-Movies CRUD endpoints.
+Movies CRUD endpoints using MongoDB.
 """
 
 import math
 from fastapi import APIRouter, HTTPException, status, Depends, Query
-from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, List
+from bson import ObjectId
+from pydantic import BaseModel
 
-from app.database import get_db, Movie, User
-from app.models import (
-    MovieCreate, 
-    MovieUpdate, 
-    MovieResponse, 
-    MoviesListResponse,
-    MessageResponse,
-    DownloadLink,
-)
-from app.auth import get_current_admin, get_optional_user
+from app.database import get_database, movie_doc, serialize_doc
+from app.routes.auth import get_current_admin
 
 router = APIRouter(prefix="/movies", tags=["Movies"])
 
 
-def movie_to_response(movie: Movie) -> MovieResponse:
-    """Convert database movie to response model."""
-    return MovieResponse(
-        id=movie.id,
-        name=movie.name,
-        name_ar=movie.name_ar,
-        poster_url=movie.poster_url,
-        movie_url=movie.movie_url,
-        year=movie.year,
-        quality=movie.quality,
-        rating=movie.rating,
-        duration=movie.duration,
-        genres=movie.genres or [],
-        description=movie.description,
-        description_ar=movie.description_ar,
-        download_links=[DownloadLink(**link) for link in (movie.download_links or [])],
-        views=movie.views or "0",
-        created_at=movie.created_at,
-        updated_at=movie.updated_at,
-    )
+# Request/Response models
+class MovieCreate(BaseModel):
+    name: str
+    movie_url: str
+    name_ar: Optional[str] = None
+    poster_url: Optional[str] = None
+    year: Optional[str] = None
+    quality: Optional[str] = None
+    rating: Optional[str] = None
+    duration: Optional[str] = None
+    genres: Optional[List[str]] = None
+    description: Optional[str] = None
+    description_ar: Optional[str] = None
+
+
+class MovieUpdate(BaseModel):
+    name: Optional[str] = None
+    name_ar: Optional[str] = None
+    poster_url: Optional[str] = None
+    movie_url: Optional[str] = None
+    year: Optional[str] = None
+    quality: Optional[str] = None
+    rating: Optional[str] = None
+    duration: Optional[str] = None
+    genres: Optional[List[str]] = None
+    description: Optional[str] = None
+    description_ar: Optional[str] = None
+    download_links: Optional[List[dict]] = None
+
+
+class MoviesListResponse(BaseModel):
+    movies: List[dict]
+    total: int
+    page: int
+    per_page: int
+    total_pages: int
 
 
 @router.get("", response_model=MoviesListResponse)
@@ -48,33 +57,31 @@ async def list_movies(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
     search: Optional[str] = Query(None, description="Search by name"),
-    db: Session = Depends(get_db),
 ):
-    """
-    List all movies with pagination.
-    Public endpoint - no authentication required.
-    """
-    query = db.query(Movie)
+    """List all movies with pagination."""
+    db = get_database()
     
-    # Search filter
+    # Build query
+    query = {}
     if search:
-        search_term = f"%{search}%"
-        query = query.filter(
-            (Movie.name.ilike(search_term)) | 
-            (Movie.name_ar.ilike(search_term))
-        )
+        query["$or"] = [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"name_ar": {"$regex": search, "$options": "i"}}
+        ]
     
     # Get total count
-    total = query.count()
+    total = await db.movies.count_documents(query)
     
     # Pagination
     total_pages = math.ceil(total / per_page) if total > 0 else 1
-    offset = (page - 1) * per_page
+    skip = (page - 1) * per_page
     
-    movies = query.order_by(Movie.created_at.desc()).offset(offset).limit(per_page).all()
+    # Fetch movies
+    cursor = db.movies.find(query).sort("created_at", -1).skip(skip).limit(per_page)
+    movies = await cursor.to_list(length=per_page)
     
     return MoviesListResponse(
-        movies=[movie_to_response(m) for m in movies],
+        movies=[serialize_doc(m) for m in movies],
         total=total,
         page=page,
         per_page=per_page,
@@ -82,16 +89,20 @@ async def list_movies(
     )
 
 
-@router.get("/{movie_id}", response_model=MovieResponse)
-async def get_movie(
-    movie_id: str,
-    db: Session = Depends(get_db),
-):
-    """
-    Get a single movie by ID.
-    Also increments view count.
-    """
-    movie = db.query(Movie).filter(Movie.id == movie_id).first()
+@router.get("/{movie_id}")
+async def get_movie(movie_id: str):
+    """Get a single movie by ID."""
+    db = get_database()
+    
+    try:
+        oid = ObjectId(movie_id)
+    except:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid movie ID"
+        )
+    
+    movie = await db.movies.find_one({"_id": oid})
     
     if not movie:
         raise HTTPException(
@@ -100,31 +111,27 @@ async def get_movie(
         )
     
     # Increment views
-    try:
-        current_views = int(movie.views or "0")
-        movie.views = str(current_views + 1)
-        db.commit()
-    except:
-        pass
+    await db.movies.update_one(
+        {"_id": oid},
+        {"$inc": {"views": 1}}
+    )
     
-    return movie_to_response(movie)
+    return serialize_doc(movie)
 
 
-@router.post("", response_model=MovieResponse)
+@router.post("")
 async def create_movie(
     movie_data: MovieCreate,
-    current_user: User = Depends(get_current_admin),
-    db: Session = Depends(get_db),
+    admin: dict = Depends(get_current_admin),
 ):
-    """
-    Create a new movie.
-    Admin only.
-    """
-    movie = Movie(
+    """Create a new movie. Admin only."""
+    db = get_database()
+    
+    new_movie = movie_doc(
         name=movie_data.name,
+        movie_url=movie_data.movie_url,
         name_ar=movie_data.name_ar,
         poster_url=movie_data.poster_url,
-        movie_url=movie_data.movie_url,
         year=movie_data.year,
         quality=movie_data.quality,
         rating=movie_data.rating,
@@ -132,28 +139,33 @@ async def create_movie(
         genres=movie_data.genres,
         description=movie_data.description,
         description_ar=movie_data.description_ar,
-        created_by=current_user.id,
+        created_by=admin.get("id"),
     )
     
-    db.add(movie)
-    db.commit()
-    db.refresh(movie)
+    result = await db.movies.insert_one(new_movie)
+    new_movie["_id"] = result.inserted_id
     
-    return movie_to_response(movie)
+    return serialize_doc(new_movie)
 
 
-@router.put("/{movie_id}", response_model=MovieResponse)
+@router.put("/{movie_id}")
 async def update_movie(
     movie_id: str,
     movie_data: MovieUpdate,
-    current_user: User = Depends(get_current_admin),
-    db: Session = Depends(get_db),
+    admin: dict = Depends(get_current_admin),
 ):
-    """
-    Update a movie.
-    Admin only.
-    """
-    movie = db.query(Movie).filter(Movie.id == movie_id).first()
+    """Update a movie. Admin only."""
+    db = get_database()
+    
+    try:
+        oid = ObjectId(movie_id)
+    except:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid movie ID"
+        )
+    
+    movie = await db.movies.find_one({"_id": oid})
     
     if not movie:
         raise HTTPException(
@@ -161,64 +173,69 @@ async def update_movie(
             detail="Movie not found"
         )
     
-    # Update fields
+    # Build update
     update_data = movie_data.model_dump(exclude_unset=True)
+    if update_data:
+        from datetime import datetime
+        update_data["updated_at"] = datetime.utcnow()
+        
+        await db.movies.update_one(
+            {"_id": oid},
+            {"$set": update_data}
+        )
     
-    # Convert download_links to dict format for JSON storage
-    if "download_links" in update_data and update_data["download_links"]:
-        update_data["download_links"] = [
-            link.model_dump() if hasattr(link, 'model_dump') else link 
-            for link in update_data["download_links"]
-        ]
-    
-    for field, value in update_data.items():
-        setattr(movie, field, value)
-    
-    db.commit()
-    db.refresh(movie)
-    
-    return movie_to_response(movie)
+    # Return updated movie
+    movie = await db.movies.find_one({"_id": oid})
+    return serialize_doc(movie)
 
 
-@router.delete("/{movie_id}", response_model=MessageResponse)
+@router.delete("/{movie_id}")
 async def delete_movie(
     movie_id: str,
-    current_user: User = Depends(get_current_admin),
-    db: Session = Depends(get_db),
+    admin: dict = Depends(get_current_admin),
 ):
-    """
-    Delete a movie.
-    Admin only.
-    """
-    movie = db.query(Movie).filter(Movie.id == movie_id).first()
+    """Delete a movie. Admin only."""
+    db = get_database()
     
-    if not movie:
+    try:
+        oid = ObjectId(movie_id)
+    except:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid movie ID"
+        )
+    
+    result = await db.movies.delete_one({"_id": oid})
+    
+    if result.deleted_count == 0:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Movie not found"
         )
     
-    db.delete(movie)
-    db.commit()
-    
-    return MessageResponse(message="Movie deleted successfully")
+    return {"message": "Movie deleted successfully"}
 
 
-@router.post("/{movie_id}/extract", response_model=MovieResponse)
+@router.post("/{movie_id}/extract")
 async def extract_movie_links(
     movie_id: str,
     limit: int = Query(5, ge=1, le=10, description="Max links to extract"),
-    current_user: User = Depends(get_current_admin),
-    db: Session = Depends(get_db),
+    admin: dict = Depends(get_current_admin),
 ):
-    """
-    Extract download links for a movie using the extraction service.
-    Updates the movie's download_links field.
-    Admin only.
-    """
+    """Extract download links for a movie. Admin only."""
     from app.services import DownloadExtractor
     
-    movie = db.query(Movie).filter(Movie.id == movie_id).first()
+    db = get_database()
+    
+    try:
+        oid = ObjectId(movie_id)
+    except:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid movie ID"
+        )
+    
+    movie = await db.movies.find_one({"_id": oid})
     
     if not movie:
         raise HTTPException(
@@ -228,7 +245,7 @@ async def extract_movie_links(
     
     # Run extraction
     extractor = DownloadExtractor()
-    result = extractor.extract(movie.movie_url, limit=limit)
+    result = extractor.extract(movie["movie_url"], limit=limit)
     
     if not result.success:
         raise HTTPException(
@@ -237,18 +254,21 @@ async def extract_movie_links(
         )
     
     # Update movie with extracted links
-    movie.download_links = [link.model_dump() for link in result.download_links]
+    update_data = {
+        "download_links": [link.model_dump() for link in result.download_links]
+    }
     
     # Update metadata if extracted
     if result.movie:
-        if result.movie.year and not movie.year:
-            movie.year = result.movie.year
-        if result.movie.quality and not movie.quality:
-            movie.quality = result.movie.quality
-        if result.movie.rating and not movie.rating:
-            movie.rating = result.movie.rating
+        if result.movie.year and not movie.get("year"):
+            update_data["year"] = result.movie.year
+        if result.movie.quality and not movie.get("quality"):
+            update_data["quality"] = result.movie.quality
+        if result.movie.rating and not movie.get("rating"):
+            update_data["rating"] = result.movie.rating
     
-    db.commit()
-    db.refresh(movie)
+    await db.movies.update_one({"_id": oid}, {"$set": update_data})
     
-    return movie_to_response(movie)
+    # Return updated movie
+    movie = await db.movies.find_one({"_id": oid})
+    return serialize_doc(movie)

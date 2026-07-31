@@ -1,13 +1,23 @@
-from app.database.connection import get_db, init_db, Base, engine
-from app.database.models import User, Movie, ExtractionLog, UserRole
+"""
+Database module - MongoDB
+"""
+
+from app.database.mongodb import connect_db, close_db, get_database
+from app.database.mongo_models import (
+    user_doc,
+    movie_doc,
+    serialize_doc,
+    hash_password,
+    verify_password,
+)
 
 __all__ = [
-    "get_db",
-    "init_db", 
-    "Base",
-    "engine",
-    "User",
-    "Movie",
-    "ExtractionLog",
-    "UserRole",
+    "connect_db",
+    "close_db", 
+    "get_database",
+    "user_doc",
+    "movie_doc",
+    "serialize_doc",
+    "hash_password",
+    "verify_password",
 ]
