@@ -9,7 +9,7 @@ seleniumbase>=4.23.0
 # FastAPI
 fastapi>=0.100.0
 uvicorn[standard]>=0.22.0
-pydantic>=2.0.0
+pydantic[email]>=2.0.0
 
 # Database - MongoDB
 motor>=3.3.0  # Async MongoDB driver
