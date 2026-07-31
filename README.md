@@ -7,9 +7,9 @@ FastAPI service that extracts direct download links from Arabic streaming sites 
 ## ✨ Features
 
 - 🎯 Extracts direct CDN download links (MP4, MKV)
+- 🛡️ **Cloudflare Bypass** using SeleniumBase UC mode
 - 🎬 Gets movie info (title, year, quality)
-- 🔗 Supports multiple hosts (streamruby, hgcloud, forafile, etc.)
-- 🛡️ Anti-detection with stealth browser mode
+- 🔗 Supports multiple hosts (megaup, streamruby, hgcloud, forafile, etc.)
 - ⚡ FastAPI with auto-generated docs
 
 ## 🚀 API Endpoints
@@ -48,7 +48,7 @@ GET /extract?url=https://tv10.egydead.live/movie-name/&limit=5
 ```json
 {
   "success": true,
-  "message": "Extracted 3 links (3 direct)",
+  "message": "Extracted 5 links (1 direct)",
   "url": "https://tv10.egydead.live/avatar-3-fire-and-ash-2025-1080p-bluray/",
   "movie": {
     "title": "Avatar 3 Fire And Ash 2025",
@@ -59,18 +59,18 @@ GET /extract?url=https://tv10.egydead.live/movie-name/&limit=5
   },
   "download_links": [
     {
-      "host": "streamruby.com",
-      "direct_link": "https://streamruby.com/cdn-cgi/content?id=...",
+      "host": "megaup.net",
+      "direct_link": "https://megadl.boats/download/Movie.1080p.mp4?download_token=...",
       "is_direct": true
     },
     {
-      "host": "hgcloud.to",
-      "direct_link": "https://...premilkyway.com/.../Movie.1080p.BluRay.mp4?t=...",
-      "is_direct": true
+      "host": "streamruby.com",
+      "direct_link": "https://streamruby.com/d/abc123",
+      "is_direct": false
     }
   ],
-  "total_links": 3,
-  "direct_links_count": 3
+  "total_links": 5,
+  "direct_links_count": 1
 }
 ```
 
@@ -80,43 +80,69 @@ GET /extract?url=https://tv10.egydead.live/movie-name/&limit=5
 Movie Page (egydead.live)
     ↓ Click "المشاهده والتحميل" button
     ↓ Find all "حمل الان" links
-Host Pages (streamruby, hgcloud, etc.)
-    ↓ Navigate through quality/download pages
-    ↓ Extract hidden CDN links from HTML/JS
-Direct Download Links (premilkyway.com, cdn, etc.)
+Host Pages (megaup, streamruby, hgcloud, etc.)
+    ↓ SeleniumBase UC mode bypasses Cloudflare
+    ↓ Extract CDN links from HTML
+Direct Download Links (megadl.boats, premilkyway.com, etc.)
 ```
+
+## 🛡️ Cloudflare Bypass
+
+This API uses **SeleniumBase** with UC (Undetected Chrome) mode to bypass Cloudflare's JavaScript challenge on download hosts like megaup.net. This is the only free method that works reliably.
+
+### What Works:
+
+- ✅ **megaup.net** → Extracts direct `megadl.boats` CDN links
+- ⏳ streamruby.com → Page loads but may need additional steps
+- ⏳ hgcloud.to → Page loads but may need additional steps
 
 ## 🖥️ Requirements
 
 - Python 3.8+
 - Chrome browser installed
-- ChromeDriver (auto-managed by selenium)
+- SeleniumBase (auto-manages ChromeDriver)
 
 ## 📦 Dependencies
 
 ```
-fastapi
-uvicorn
-selenium
-beautifulsoup4
-requests
-```
-
-**Optional (for better anti-detection):**
-
-```
-undetected-chromedriver
+seleniumbase>=4.23.0
+fastapi>=0.100.0
+uvicorn[standard]>=0.22.0
+beautifulsoup4>=4.11.0
+pydantic>=2.0.0
 ```
 
 ## 🚀 Deployment
 
 > ⚠️ **Note:** This API uses Selenium which requires a browser. It won't work on serverless platforms like Vercel.
 
+### Docker (Railway/Render)
+
+```dockerfile
+FROM python:3.11-slim
+RUN apt-get update && apt-get install -y wget gnupg unzip curl xvfb
+RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+    && apt-get install -y /tmp/chrome.deb && rm /tmp/chrome.deb
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+RUN seleniumbase install chromedriver
+COPY . .
+EXPOSE 8000
+CMD uvicorn api:app --host 0.0.0.0 --port ${PORT:-8000}
+```
+
 ### Recommended Platforms:
 
 - **Railway** (free tier) - supports Docker
 - **Render** (free tier) - supports Docker
 - **VPS** (DigitalOcean, Linode, etc.)
+
+## ⚡ Performance Notes
+
+- First request takes ~30-60 seconds (browser startup + Cloudflare wait)
+- Each download link processing takes ~10-20 seconds
+- Use `limit` parameter to speed up extraction (e.g., `?limit=3`)
 
 ## 📄 License
 
