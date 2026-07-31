@@ -1,8 +1,17 @@
 from app.models.schemas import (
     DownloadLink,
-    MovieInfo,
+    MovieInfo, 
     ExtractResponse,
     HealthResponse,
+    UserCreate,
+    UserLogin,
+    UserResponse,
+    TokenResponse,
+    MessageResponse,
+    MovieCreate,
+    MovieUpdate,
+    MovieResponse,
+    MoviesListResponse,
 )
 
 __all__ = [
@@ -10,4 +19,13 @@ __all__ = [
     "MovieInfo", 
     "ExtractResponse",
     "HealthResponse",
+    "UserCreate",
+    "UserLogin",
+    "UserResponse",
+    "TokenResponse",
+    "MessageResponse",
+    "MovieCreate",
+    "MovieUpdate",
+    "MovieResponse",
+    "MoviesListResponse",
 ]

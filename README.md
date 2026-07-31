@@ -1,6 +1,6 @@
-# 🎬 Movies Download API
+# 🎬 Movie Hub - Backend API
 
-FastAPI service that extracts direct download links from Arabic streaming sites (EgyDead, etc.).
+FastAPI service that extracts direct download links from Arabic streaming sites (EgyDead, etc.) with user authentication and movie management.
 
 **100% FREE** - No paid services, no API keys required!
 
@@ -13,31 +13,37 @@ FastAPI service that extracts direct download links from Arabic streaming sites 
 ## 📁 Project Structure
 
 ```
+BE/
 ├── app/
 │   ├── __init__.py
 │   ├── main.py              # FastAPI app factory
 │   ├── config.py            # Settings & environment config
 │   ├── auth/
 │   │   ├── __init__.py
+│   │   ├── jwt_handler.py   # JWT authentication
 │   │   └── api_key.py       # API key authentication
+│   ├── database/
+│   │   ├── __init__.py
+│   │   ├── connection.py    # SQLite database setup
+│   │   └── models.py        # SQLAlchemy models
 │   ├── models/
 │   │   ├── __init__.py
 │   │   └── schemas.py       # Pydantic models
 │   ├── routes/
 │   │   ├── __init__.py
 │   │   ├── health.py        # Health check endpoint
+│   │   ├── auth.py          # User authentication routes
+│   │   ├── movies.py        # Movies CRUD endpoints
 │   │   └── extract.py       # Extraction endpoints
 │   └── services/
 │       ├── __init__.py
 │       └── extractor.py     # SeleniumBase extraction logic
 ├── docs/
-│   └── How-We-Bypassed-Cloudflare.md  # Technical documentation
+│   └── How-We-Bypassed-Cloudflare.md
 ├── api.py                   # Uvicorn entry point
 ├── requirements.txt
 ├── Dockerfile
-├── .env                     # Environment variables (create from .env.example)
-├── .env.example             # Example environment file
-├── render.yaml
+├── .env.example
 └── README.md
 ```
 
@@ -45,28 +51,54 @@ FastAPI service that extracts direct download links from Arabic streaming sites 
 
 - 🎯 Extracts direct CDN download links (MP4, MKV)
 - 🛡️ **Cloudflare Bypass** using SeleniumBase UC mode
-- 🔐 **Optional API Key Authentication**
+- 🔐 **JWT Authentication** with admin roles
+- 🗄️ **SQLite Database** - File-based, never shuts down
 - 🎬 Gets movie info (title, year, quality)
 - 🔗 Supports multiple hosts (megaup, streamruby, hgcloud, etc.)
 - ⚡ FastAPI with auto-generated docs
 
 ## 🚀 API Endpoints
 
+### Authentication
+
+| Method | Endpoint         | Auth Required | Description                            |
+| ------ | ---------------- | ------------- | -------------------------------------- |
+| `POST` | `/auth/register` | No            | Register new user (first user = admin) |
+| `POST` | `/auth/login`    | No            | User login                             |
+| `GET`  | `/auth/me`       | Yes           | Get current user                       |
+
+### Movies (CRUD)
+
+| Method   | Endpoint              | Auth Required | Description             |
+| -------- | --------------------- | ------------- | ----------------------- |
+| `GET`    | `/movies`             | No            | List movies (paginated) |
+| `GET`    | `/movies/:id`         | No            | Get single movie        |
+| `POST`   | `/movies`             | Admin         | Create movie            |
+| `PUT`    | `/movies/:id`         | Admin         | Update movie            |
+| `DELETE` | `/movies/:id`         | Admin         | Delete movie            |
+| `POST`   | `/movies/:id/extract` | Admin         | Extract download links  |
+
+### Extraction
+
 | Method | Endpoint                   | Auth Required | Description            |
 | ------ | -------------------------- | ------------- | ---------------------- |
-| `GET`  | `/`                        | No            | Health check           |
-| `GET`  | `/extract?url=...&limit=N` | Yes\*         | Extract download links |
-| `POST` | `/extract`                 | Yes\*         | Same as GET            |
-| `GET`  | `/docs`                    | No            | Swagger UI             |
+| `GET`  | `/extract?url=...&limit=N` | Optional\*    | Extract download links |
+| `POST` | `/extract`                 | Optional\*    | Same as GET            |
 
 \*Auth required only if `AUTH_ENABLED=true`
+
+### Health & Docs
+
+| Method | Endpoint | Description  |
+| ------ | -------- | ------------ |
+| `GET`  | `/`      | Health check |
+| `GET`  | `/docs`  | Swagger UI   |
 
 ## 📦 Installation
 
 ```bash
-# Clone
-git clone https://github.com/Walidhamdy44/Python_Movies_API.git
-cd Python_Movies_API
+# Navigate to BE folder
+cd BE
 
 # Install dependencies
 pip install -r requirements.txt
@@ -74,64 +106,60 @@ pip install -r requirements.txt
 # Copy environment file
 cp .env.example .env
 
-# Run (no auth)
-python -m uvicorn api:app --host 0.0.0.0 --port 8000
-
-# Run (with auth)
-# Edit .env first: AUTH_ENABLED=true, API_KEY=your-secret-key
+# Run
 python -m uvicorn api:app --host 0.0.0.0 --port 8000
 ```
 
 ## 🔐 Authentication
 
-Authentication is **optional** and disabled by default.
+### JWT Authentication (for Frontend)
 
-### Enable Authentication
+Users register and login to get JWT tokens. First registered user becomes admin.
 
-1. Copy `.env.example` to `.env`
-2. Edit `.env`:
+```bash
+# Register
+curl -X POST http://localhost:8000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","username":"admin","password":"secret123"}'
+
+# Login
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"secret123"}'
+```
+
+### API Key Authentication (Optional)
+
+For direct API access without user accounts:
+
+1. Edit `.env`:
+
    ```
    AUTH_ENABLED=true
    API_KEY=your-secret-api-key-here
    ```
-3. Restart the server
 
-### Generate a Secure API Key
-
-```bash
-# Linux/Mac
-openssl rand -hex 32
-
-# PowerShell
-[System.Guid]::NewGuid().ToString() + [System.Guid]::NewGuid().ToString()
-```
-
-### Using the API with Auth
-
-Include the `X-API-Key` header in your requests:
-
-```bash
-curl -H "X-API-Key: your-secret-api-key-here" \
-  "http://localhost:8000/extract?url=https://tv10.egydead.live/movie-name/"
-```
+2. Use the `X-API-Key` header:
+   ```bash
+   curl -H "X-API-Key: your-secret-api-key-here" \
+     "http://localhost:8000/extract?url=https://tv10.egydead.live/movie-name/"
+   ```
 
 ## ⚙️ Configuration
 
-All settings are configured via environment variables (`.env` file):
+All settings via environment variables (`.env` file):
 
-| Variable                | Default | Description                            |
-| ----------------------- | ------- | -------------------------------------- |
-| `AUTH_ENABLED`          | `false` | Enable API key authentication          |
-| `API_KEY`               | `""`    | Your secret API key                    |
-| `CORS_ORIGINS`          | `*`     | Allowed CORS origins (comma-separated) |
-| `MAX_WORKERS`           | `3`     | Thread pool size for extractions       |
-| `MAX_LIMIT`             | `50`    | Max links per request                  |
-| `PAGE_LOAD_WAIT`        | `4`     | Initial page load timeout (seconds)    |
-| `CLOUDFLARE_WAIT`       | `10`    | Cloudflare bypass wait (seconds)       |
-| `CLOUDFLARE_EXTRA_WAIT` | `15`    | Extra wait if stuck (seconds)          |
-| `BUTTON_CLICK_WAIT`     | `4`     | Wait after clicking buttons (seconds)  |
+| Variable          | Default                   | Description                         |
+| ----------------- | ------------------------- | ----------------------------------- |
+| `SECRET_KEY`      | random                    | JWT secret key                      |
+| `AUTH_ENABLED`    | `false`                   | Enable API key authentication       |
+| `API_KEY`         | `""`                      | Your secret API key                 |
+| `CORS_ORIGINS`    | `*`                       | Allowed CORS origins                |
+| `DATABASE_URL`    | `sqlite:///./moviehub.db` | Database connection                 |
+| `PAGE_LOAD_WAIT`  | `4`                       | Initial page load timeout (seconds) |
+| `CLOUDFLARE_WAIT` | `10`                      | Cloudflare bypass wait (seconds)    |
 
-## 📝 Usage
+## 📝 Usage Example
 
 ### Extract Download Links
 
@@ -157,78 +185,27 @@ GET /extract?url=https://tv10.egydead.live/movie-name/&limit=5
       "direct_link": "https://megadl.boats/download/Movie.1080p.mp4?download_token=...",
       "is_direct": true
     }
-  ],
-  "total_links": 5,
-  "direct_links_count": 1
+  ]
 }
 ```
 
-## 🛡️ Cloudflare Bypass
-
-This API uses **SeleniumBase** with UC (Undetected Chrome) mode to bypass Cloudflare's JavaScript Challenge.
-
-📖 **[Read the full technical documentation →](docs/How-We-Bypassed-Cloudflare.md)**
-
-### Summary
-
-| Approach                 | Works? | Cost      |
-| ------------------------ | ------ | --------- |
-| Regular Selenium         | ❌     | Free      |
-| cloudscraper             | ❌     | Free      |
-| Playwright + Stealth     | ❌     | Free      |
-| **SeleniumBase UC Mode** | ✅     | **Free**  |
-| Paid CAPTCHA services    | ✅     | $2-3/1000 |
-
-### What Works:
-
-- ✅ **megaup.net** → Extracts direct `megadl.boats` CDN links
-- ⏳ streamruby.com → Page loads, additional steps may be needed
-- ⏳ hgcloud.to → Page loads, additional steps may be needed
-
 ## 🚀 Deployment
-
-### Docker (Railway/Render)
-
-```bash
-docker build -t movies-api .
-docker run -p 8000:8000 \
-  -e AUTH_ENABLED=true \
-  -e API_KEY=your-secret-key \
-  movies-api
-```
 
 ### Railway
 
 1. Connect your GitHub repo to Railway
-2. Add environment variables in Railway dashboard:
-   - `AUTH_ENABLED=true`
-   - `API_KEY=your-secret-key`
+2. Set environment variables in Railway dashboard
 3. Deploy!
 
-### Render
+**Live URL:** https://movies-download-api-production.up.railway.app
 
-Use the included `render.yaml` or configure manually.
+### Docker
 
-> ⚠️ **Note:** This API uses Selenium which requires a browser. It won't work on serverless platforms like Vercel or AWS Lambda.
-
-## ⚡ Performance Notes
-
-- First request takes ~30-60 seconds (browser startup + Cloudflare wait)
-- Each download link processing takes ~10-20 seconds
-- Use `limit` parameter to speed up extraction (e.g., `?limit=3`)
-- Requires ~500MB RAM per extraction
-
-## 🔒 Security Notes
-
-- Never commit your `.env` file (it's in `.gitignore`)
-- Use strong, random API keys in production
-- Rotate API keys periodically
-- Consider IP whitelisting for additional security
+```bash
+docker build -t movies-api .
+docker run -p 8000:8000 movies-api
+```
 
 ## 📄 License
 
 MIT
-
-## 👤 Author
-
-[Walidhamdy44](https://github.com/Walidhamdy44)
