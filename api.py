@@ -101,6 +101,12 @@ class DownloadExtractor:
         options.add_experimental_option('excludeSwitches', ['enable-automation'])
         options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
         
+        # For Docker/Linux - use system Chrome
+        import shutil
+        chrome_path = shutil.which('google-chrome') or shutil.which('chromium-browser')
+        if chrome_path:
+            options.binary_location = chrome_path
+        
         self.driver = webdriver.Chrome(options=options)
         self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
             'source': "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"

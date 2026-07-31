@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: movies-download-api
+    runtime: docker
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"

@@ -9,9 +9,3 @@ lxml>=4.9.0
 fastapi>=0.100.0
 uvicorn[standard]>=0.22.0
 pydantic>=2.0.0
-
-# Optional: Stealth mode (bypass detection)
-undetected-chromedriver>=3.5.0
-
-# Optional: Free audio captcha solving
-SpeechRecognition>=3.8.0
