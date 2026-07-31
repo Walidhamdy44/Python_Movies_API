@@ -3,17 +3,61 @@ Authentication endpoints using MongoDB.
 """
 
 from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from bson import ObjectId
 
-from app.database import get_database, user_doc, serialize_doc, hash_password, verify_password
-from app.auth.jwt_handler import create_access_token
+from app.database import get_database, user_doc, serialize_doc, verify_password
+from app.auth.jwt_handler import create_access_token, decode_access_token
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
+# Security
+security = HTTPBearer()
 
-# Request/Response models
+
+# ============== Dependencies (defined first) ==============
+
+async def get_current_user_id(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+) -> str:
+    """Extract user ID from JWT token."""
+    token = credentials.credentials
+    payload = decode_access_token(token)
+    
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token"
+        )
+    
+    return payload.get("sub")
+
+
+async def get_current_admin(user_id: str = Depends(get_current_user_id)) -> dict:
+    """Get current user and verify admin status."""
+    db = get_database()
+    
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    if not user.get("is_admin", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    
+    return serialize_doc(user)
+
+
+# ============== Request/Response models ==============
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     username: str
@@ -37,6 +81,8 @@ class UserResponse(BaseModel):
     username: str
     is_admin: bool
 
+
+# ============== Endpoints ==============
 
 @router.post("/register", response_model=TokenResponse)
 async def register(data: RegisterRequest):
@@ -130,49 +176,3 @@ async def get_me(user_id: str = Depends(get_current_user_id)):
         username=user["username"],
         is_admin=user.get("is_admin", False)
     )
-
-
-# Dependency to get current user ID from token
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from app.auth.jwt_handler import decode_access_token
-
-security = HTTPBearer()
-
-
-async def get_current_user_id(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
-) -> str:
-    """Extract user ID from JWT token."""
-    token = credentials.credentials
-    payload = decode_access_token(token)
-    
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token"
-        )
-    
-    return payload.get("sub")
-
-
-async def get_current_admin(
-    user_id: str = Depends(get_current_user_id)
-) -> dict:
-    """Get current user and verify admin status."""
-    db = get_database()
-    
-    user = await db.users.find_one({"_id": ObjectId(user_id)})
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    if not user.get("is_admin", False):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required"
-        )
-    
-    return serialize_doc(user)

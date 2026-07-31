@@ -3,7 +3,6 @@ FastAPI Application - Movie Download Link Extractor API
 Using MongoDB for persistence.
 """
 
-import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,7 +43,7 @@ def create_app() -> FastAPI:
     )
     
     # Include routers
-    from app.routes import extract, health, auth, movies
+    from app.routes import health, auth, movies, extract
     
     app.include_router(health.router)
     app.include_router(auth.router)
