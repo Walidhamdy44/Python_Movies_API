@@ -336,127 +336,81 @@ class DownloadExtractor:
         """Extract final download link. Returns (link, is_direct)."""
         try:
             self.driver.get(url)
-            time.sleep(3)
-            
-            # Check for streamruby - needs to click download button first
-            if 'streamruby' in url:
-                return self._handle_streamruby(url)
+            time.sleep(4)
             
             html = self.driver.page_source
             soup = BeautifulSoup(html, 'html.parser')
+            current_url = self.driver.current_url
             
-            # Look for direct download links
+            # First, aggressively search HTML for direct CDN links
+            cdn_patterns = [
+                r'https?://[a-z0-9]+\.premilkyway\.com[^"\'<>\s]+\.mp4[^"\'<>\s]*',
+                r'https?://[a-z0-9]+\.streamruby\.net[^"\'<>\s]+\.mp4[^"\'<>\s]*',
+                r'https?://[^"\'<>\s]*cdn[^"\'<>\s]*\.mp4[^"\'<>\s]*',
+            ]
+            
+            for pattern in cdn_patterns:
+                matches = re.findall(pattern, html, re.IGNORECASE)
+                if matches:
+                    return (matches[0], True)
+            
+            # Check all links for direct download URLs
             for a_tag in soup.find_all('a', href=True):
                 href = a_tag['href']
                 classes = a_tag.get('class', [])
                 class_str = ' '.join(classes) if isinstance(classes, list) else ''
                 
-                # Direct file links
-                if any(x in href.lower() for x in ['.mp4', '.mkv', '.avi', 'premilkyway', 'cdn']):
-                    if not href.startswith('#'):
-                        return (urljoin(url, href), True)
+                # Direct file links in href
+                if any(x in href.lower() for x in ['.mp4', '.mkv', 'premilkyway', 'streamruby.net']):
+                    if not href.startswith('#') and not href.startswith('javascript'):
+                        return (urljoin(current_url, href), True)
                 
-                # Download buttons
-                if 'submit-btn' in class_str or 'download-btn' in class_str or 'btn-gr' in class_str:
+                # Download buttons with direct href
+                if any(x in class_str for x in ['submit-btn', 'download-btn', 'btn-gr']):
                     if href and not href.startswith('#') and not href.startswith('javascript'):
                         if 'registration' not in href.lower() and 'login' not in href.lower():
-                            full_url = urljoin(url, href)
-                            # Check if it's a direct link
-                            if any(x in href.lower() for x in ['.mp4', '.mkv', 'cdn', 'premilkyway', 'streamruby.net']):
-                                return (full_url, True)
+                            # Check if it's a CDN link
+                            if any(x in href.lower() for x in ['.mp4', 'premilkyway', 'cdn']):
+                                return (urljoin(current_url, href), True)
             
-            # Hidden links
-            hidden = self._find_hidden_links(html)
-            for link in hidden:
-                if any(x in link.lower() for x in ['.mp4', '.mkv', 'premilkyway', 'streamruby.net']):
-                    return (link, True)
-            
-            # Try clicking download button
-            buttons = self.driver.find_elements(By.CSS_SELECTOR, 
-                'a.submit-btn, a.btn-gr, a.download-btn, button.submit-btn, a.btn-primary.download-btn')
-            
-            for btn in buttons:
-                try:
-                    href = btn.get_attribute('href')
-                    if href and any(x in href.lower() for x in ['.mp4', 'cdn', 'premilkyway', 'streamruby.net']):
-                        return (href, True)
-                    
-                    self.driver.execute_script("arguments[0].click();", btn)
-                    time.sleep(3)
-                    
-                    # Check for new link in page
-                    new_html = self.driver.page_source
-                    new_soup = BeautifulSoup(new_html, 'html.parser')
-                    
-                    for a in new_soup.find_all('a', href=True):
-                        h = a['href']
-                        if any(x in h.lower() for x in ['.mp4', '.mkv', 'premilkyway', 'streamruby.net']):
-                            return (h, True)
-                    
-                    break
-                except:
-                    continue
-            
-            return (url, False)
-        except Exception:
-            return (url, False)
-    
-    def _handle_streamruby(self, url: str) -> tuple:
-        """Handle streamruby.com specifically - needs to click download button."""
-        try:
-            html = self.driver.page_source
-            soup = BeautifulSoup(html, 'html.parser')
-            
-            # First check if direct link already exists
-            for a_tag in soup.find_all('a', href=True):
-                href = a_tag['href']
-                classes = a_tag.get('class', [])
-                class_str = ' '.join(classes) if isinstance(classes, list) else ''
-                
-                # Look for download-btn with direct link
-                if 'download-btn' in class_str and 'streamruby.net' in href:
-                    return (href, True)
-                
-                # Or any direct mp4 link
-                if '.mp4' in href and 'streamruby.net' in href:
-                    return (href, True)
-            
-            # Click the download button (btn-primary download-btn)
+            # Try clicking download button to see if link appears
             try:
-                download_btn = self.driver.find_element(By.CSS_SELECTOR, 'a.btn-primary.download-btn, a.download-btn, button.download-btn')
-                href = download_btn.get_attribute('href')
+                buttons = self.driver.find_elements(By.CSS_SELECTOR, 
+                    'a.submit-btn, a.btn-gr, a.download-btn, a.btn-primary.download-btn')
                 
-                if href and 'streamruby.net' in href:
-                    return (href, True)
-                
-                # Click and wait for redirect/new page
-                self.driver.execute_script("arguments[0].click();", download_btn)
-                time.sleep(4)
-                
-                # Check new page for direct link
-                new_html = self.driver.page_source
-                new_soup = BeautifulSoup(new_html, 'html.parser')
-                
-                for a_tag in new_soup.find_all('a', href=True):
-                    href = a_tag['href']
-                    if 'streamruby.net' in href and '.mp4' in href:
-                        return (href, True)
-                
-                # Also check current URL if redirected
-                current_url = self.driver.current_url
-                if 'streamruby.net' in current_url and '.mp4' in current_url:
-                    return (current_url, True)
-                    
-            except Exception as e:
+                for btn in buttons:
+                    if btn.is_displayed():
+                        href = btn.get_attribute('href')
+                        if href and any(x in href.lower() for x in ['.mp4', 'premilkyway', 'streamruby.net', 'cdn']):
+                            return (href, True)
+                        
+                        # Try clicking
+                        try:
+                            self.driver.execute_script("arguments[0].click();", btn)
+                            time.sleep(4)
+                            
+                            new_html = self.driver.page_source
+                            
+                            # Search for CDN links again
+                            for pattern in cdn_patterns:
+                                matches = re.findall(pattern, new_html, re.IGNORECASE)
+                                if matches:
+                                    return (matches[0], True)
+                            
+                            # Check current URL
+                            new_url = self.driver.current_url
+                            if any(x in new_url.lower() for x in ['.mp4', 'premilkyway']):
+                                return (new_url, True)
+                                
+                        except:
+                            pass
+                        break
+            except:
                 pass
             
-            # Fallback: search for any direct link in JS/hidden
-            hidden = self._find_hidden_links(html)
-            for link in hidden:
-                if 'streamruby.net' in link and '.mp4' in link:
-                    return (link, True)
+            # Return the final page URL we reached
+            return (current_url, False)
             
-            return (url, False)
         except Exception:
             return (url, False)
     
