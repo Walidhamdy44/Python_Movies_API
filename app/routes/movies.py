@@ -61,9 +61,9 @@ async def list_movies(
     """List all movies with pagination."""
     db = get_database()
     
-    # Build query
+    # Build query - ignore "undefined" string from frontend
     query = {}
-    if search:
+    if search and search.lower() not in ["undefined", "null", ""]:
         query["$or"] = [
             {"name": {"$regex": search, "$options": "i"}},
             {"name_ar": {"$regex": search, "$options": "i"}}
