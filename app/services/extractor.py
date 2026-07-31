@@ -357,6 +357,63 @@ class DownloadExtractor:
             logger.error(f"generic extraction failed: {e}")
             return (url, False)
     
+    def extract_info_only(self, url: str) -> ExtractResponse:
+        """
+        FAST extraction - movie info only, NO download link processing.
+        
+        Args:
+            url: Movie page URL to extract from
+            
+        Returns:
+            ExtractResponse with movie info only (no download links processed)
+        """
+        if not SELENIUMBASE_AVAILABLE:
+            return ExtractResponse(
+                success=False,
+                message="SeleniumBase not installed",
+                url=url
+            )
+        
+        try:
+            with SB(uc=True, headless=True) as sb:
+                logger.info(f"[FAST] Loading: {url}")
+                
+                sb.open(url)
+                sb.sleep(settings.PAGE_LOAD_WAIT)
+                
+                html = sb.get_page_source()
+                title = sb.get_title()
+                
+                # Check if Cloudflare challenge
+                if 'Just a moment' in html or 'Just a moment' in title:
+                    logger.info("[FAST] Waiting for Cloudflare...")
+                    sb.sleep(settings.CLOUDFLARE_WAIT)
+                    html = sb.get_page_source()
+                
+                movie_info = self._extract_movie_info(html, url)
+                logger.info(f"[FAST] Movie: {movie_info.title}")
+                
+                # Get download link count without processing them
+                download_urls = self._find_download_links(html)
+                
+                return ExtractResponse(
+                    success=True,
+                    message=f"Movie info extracted (found {len(download_urls)} download links)",
+                    url=url,
+                    movie=movie_info,
+                    download_links=[],
+                    total_links=len(download_urls),
+                    direct_links_count=0
+                )
+                
+        except Exception as e:
+            logger.exception(f"[FAST] Extraction failed: {e}")
+            return ExtractResponse(
+                success=False,
+                message=f"Error: {str(e)}",
+                url=url
+            )
+
     def extract(self, url: str, limit: int = None) -> ExtractResponse:
         """
         Main extraction method.
