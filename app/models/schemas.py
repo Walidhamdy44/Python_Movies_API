@@ -94,7 +94,7 @@ class MovieCreate(BaseModel):
     """Create a new movie."""
     name: str
     name_ar: Optional[str] = None
-    poster_url: str
+    poster_url: Optional[str] = None
     movie_url: str
     year: Optional[str] = None
     quality: Optional[str] = None

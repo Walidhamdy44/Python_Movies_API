@@ -44,7 +44,7 @@ class Movie(Base):
     # Basic info
     name = Column(String(255), nullable=False)
     name_ar = Column(String(255), nullable=True)  # Arabic name
-    poster_url = Column(Text, nullable=False)
+    poster_url = Column(Text, nullable=True)  # Made optional
     movie_url = Column(Text, nullable=False)
     
     # Metadata
