@@ -1,9 +1,13 @@
 services:
   - type: web
     name: movies-download-api
-    runtime: docker
+    env: docker
     plan: free
     healthCheckPath: /
     envVars:
-      - key: PYTHONUNBUFFERED
-        value: "1"
+      - key: PORT
+        value: 8000
+      - key: AUTH_ENABLED
+        value: "false"
+      - key: API_KEY
+        sync: false # Set this manually in Render dashboard for security

@@ -37,5 +37,9 @@ COPY . .
 # Expose port
 EXPOSE 8000
 
+# Environment variables (can be overridden at runtime)
+ENV AUTH_ENABLED=false
+ENV API_KEY=""
+
 # Run the app
 CMD uvicorn api:app --host 0.0.0.0 --port ${PORT:-8000}

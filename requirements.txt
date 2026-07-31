@@ -10,3 +10,6 @@ seleniumbase>=4.23.0
 fastapi>=0.100.0
 uvicorn[standard]>=0.22.0
 pydantic>=2.0.0
+
+# Environment variables (optional)
+python-dotenv>=1.0.0
