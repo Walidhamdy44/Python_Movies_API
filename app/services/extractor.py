@@ -4,7 +4,7 @@ Download link extraction service using SeleniumBase.
 
 import re
 import logging
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, unquote
 from bs4 import BeautifulSoup
 
 from app.config import settings
@@ -33,63 +33,94 @@ class DownloadExtractor:
         """Extract movie information from page HTML."""
         soup = BeautifulSoup(html, 'html.parser')
         
-        # Title from URL
+        # Try to get title from page first
         title = ""
-        url_path = urlparse(url).path.strip('/')
-        if url_path:
-            title_from_url = url_path.replace('-', ' ')
-            title_from_url = re.sub(
-                r'\b(1080p|720p|480p|bluray|webrip|hdtv|cam)\b', 
-                '', 
-                title_from_url, 
-                flags=re.I
-            )
-            title = ' '.join(title_from_url.split()).strip().title()
         
-        if not title:
-            og_title = soup.find('meta', property='og:title')
-            if og_title and og_title.get('content'):
-                title = og_title['content']
+        # Method 1: og:title meta tag
+        og_title = soup.find('meta', property='og:title')
+        if og_title and og_title.get('content'):
+            title = og_title['content'].strip()
         
+        # Method 2: page title
         if not title:
             page_title = soup.find('title')
             if page_title:
-                title = page_title.get_text(strip=True).split('|')[0].strip()
+                title = page_title.get_text(strip=True).split('|')[0].split('-')[0].strip()
         
-        # Year
+        # Method 3: h1 or main title element
+        if not title:
+            h1 = soup.select_one('h1.entry-title, h1.title, h1, .movie-title')
+            if h1:
+                title = h1.get_text(strip=True)
+        
+        # Method 4: From URL (decode URL-encoded characters)
+        if not title or title == "Unknown":
+            url_path = unquote(urlparse(url).path.strip('/'))  # Decode URL encoding
+            if url_path:
+                # Remove common prefixes like مشاهدة-فيلم
+                title_from_url = url_path.replace('-', ' ')
+                # Remove quality tags
+                title_from_url = re.sub(
+                    r'\b(1080p|720p|480p|bluray|webrip|hdtv|cam|مترجم|مشاهده|مشاهدة|فيلم|تحميل)\b', 
+                    '', 
+                    title_from_url, 
+                    flags=re.I
+                )
+                title = ' '.join(title_from_url.split()).strip()
+        
+        # Clean up title
+        if title:
+            # Remove "مشاهدة فيلم" prefix if present
+            title = re.sub(r'^(مشاهده|مشاهدة)\s*(فيلم)?\s*', '', title, flags=re.I).strip()
+            # Remove trailing "مترجم"
+            title = re.sub(r'\s*مترجم\s*$', '', title, flags=re.I).strip()
+        
+        # Year - extract from title or URL
         year = None
-        year_match = re.search(r'(19|20)\d{2}', url + title)
+        year_match = re.search(r'(19|20)\d{2}', url + (title or ''))
         if year_match:
             year = year_match.group(0)
         
-        # Image
+        # Image/Poster - try multiple selectors
         image = None
         img_selectors = [
             '.single-thumb img', '.movie-thumb img', '.thumb img',
             'img.poster', '.poster img', '.movie-poster img',
-            'img[itemprop="image"]', 'article img', '.featured-img img'
+            'img[itemprop="image"]', 'article img', '.featured-img img',
+            '.entry-content img', '.post-thumbnail img', 'img.wp-post-image',
+            '.film-poster img', '.cover img', 'meta[property="og:image"]'
         ]
-        for selector in img_selectors:
-            img = soup.select_one(selector)
-            if img:
-                src = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
-                if src and 'logo' not in src.lower():
-                    image = urljoin(url, src)
-                    break
+        
+        # Try og:image first
+        og_image = soup.find('meta', property='og:image')
+        if og_image and og_image.get('content'):
+            image = og_image['content']
+        
+        # Try other selectors
+        if not image:
+            for selector in img_selectors:
+                if selector.startswith('meta'):
+                    continue
+                img = soup.select_one(selector)
+                if img:
+                    src = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
+                    if src and 'logo' not in src.lower() and 'icon' not in src.lower():
+                        image = urljoin(url, src)
+                        break
         
         # Quality
         quality = None
-        quality_elem = soup.select_one('.quality, .qlty, span.quality, .label-quality')
+        quality_elem = soup.select_one('.quality, .qlty, span.quality, .label-quality, .movie-quality')
         if quality_elem:
             quality = quality_elem.get_text(strip=True)
         else:
-            q_match = re.search(r'(1080p|720p|480p|4k)', url, re.I)
+            q_match = re.search(r'(1080p|720p|480p|4k|bluray|hdrip|webrip)', url + (title or ''), re.I)
             if q_match:
                 quality = q_match.group(1).upper()
         
         # Rating
         rating = None
-        rating_elem = soup.select_one('.rating .num, .imdb-rating, [class*="rating"] span')
+        rating_elem = soup.select_one('.rating .num, .imdb-rating, [class*="rating"] span, .imdb span')
         if rating_elem:
             rating_text = rating_elem.get_text(strip=True)
             r_match = re.search(r'[\d.]+', rating_text)
@@ -98,13 +129,13 @@ class DownloadExtractor:
         
         # Duration
         duration = None
-        duration_elem = soup.select_one('.runtime, .duration, [class*="duration"], .time')
+        duration_elem = soup.select_one('.runtime, .duration, [class*="duration"], .time, .movie-duration')
         if duration_elem:
             duration = duration_elem.get_text(strip=True)
         
         # Genres
         genres = []
-        genre_selectors = ['.genres a', '.genre a', 'a[href*="/genre/"]', '.cats a']
+        genre_selectors = ['.genres a', '.genre a', 'a[href*="/genre/"]', '.cats a', '.category a']
         for selector in genre_selectors:
             genre_links = soup.select(selector)
             for g in genre_links[:5]:
