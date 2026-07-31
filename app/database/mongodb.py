@@ -3,8 +3,8 @@ MongoDB connection using Motor (async driver).
 """
 
 import os
+import certifi
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo.server_api import ServerApi
 
 # MongoDB connection string
 MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
@@ -21,10 +21,12 @@ async def connect_db():
     
     print(f"Connecting to MongoDB...")
     
+    # Use certifi for SSL certificates (fixes SSL issues on some platforms)
     client = AsyncIOMotorClient(
         MONGODB_URL,
-        server_api=ServerApi('1'),
-        serverSelectionTimeoutMS=5000
+        tlsCAFile=certifi.where(),
+        serverSelectionTimeoutMS=10000,
+        connectTimeoutMS=10000,
     )
     
     # Test connection
