@@ -1,116 +1,127 @@
-# Download Link Extractor with 2Captcha Support
+# 🎬 Movies Download API
 
-Automatically extracts direct download links from Arabic streaming sites like EgyDead, with automatic captcha solving using 2Captcha.
+FastAPI service that extracts direct download links from Arabic streaming sites (EgyDead, etc.).
 
-## Features
+**100% FREE** - No paid services, no API keys required!
 
-- ✅ Finds all "حمل الان" download links
-- ✅ Follows multiple intermediate pages automatically
-- ✅ Solves reCAPTCHA v2/v3 using 2Captcha service
-- ✅ Extracts final direct download URLs (premilkyway, cdn, etc.)
+## ✨ Features
 
-## Installation
+- 🎯 Extracts direct CDN download links (MP4, MKV)
+- 🎬 Gets movie info (title, year, quality)
+- 🔗 Supports multiple hosts (streamruby, hgcloud, forafile, etc.)
+- 🛡️ Anti-detection with stealth browser mode
+- ⚡ FastAPI with auto-generated docs
 
-```bash
-pip install requests beautifulsoup4 selenium
-```
+## 🚀 API Endpoints
 
-## Usage
+| Method | Endpoint                   | Description            |
+| ------ | -------------------------- | ---------------------- |
+| `GET`  | `/`                        | Health check           |
+| `GET`  | `/extract?url=...&limit=N` | Extract download links |
+| `POST` | `/extract`                 | Same as GET            |
+| `GET`  | `/docs`                    | Swagger UI             |
 
-### Without Captcha Solving
-
-Will stop at the captcha page:
-
-```bash
-python download_extractor.py "https://tv10.egydead.live/shelter-2026-1080p-bluray/"
-```
-
-### With 2Captcha API Key
-
-Automatically solves captcha and gets direct download link:
+## 📦 Installation
 
 ```bash
-# Using command line argument
-python download_extractor.py -k YOUR_2CAPTCHA_API_KEY "https://tv10.egydead.live/shelter-2026-1080p-bluray/"
+# Clone
+git clone https://github.com/Walidhamdy44/Python_Movies_API.git
+cd Python_Movies_API
 
-# Or using environment variable
-set CAPTCHA_API_KEY=your_key_here
-python download_extractor.py "https://tv10.egydead.live/shelter-2026-1080p-bluray/"
+# Install dependencies
+pip install -r requirements.txt
+
+# Run
+python -m uvicorn api:app --host 0.0.0.0 --port 8000
 ```
 
-### Options
+## 📝 Usage
 
-```
--h, --help         Show help
--d, --debug        Enable debug mode
--l, --limit N      Only process first N download links
--k, --key KEY      2Captcha API key
-```
-
-### Examples
+### Extract Download Links
 
 ```bash
-# Process first 3 links with captcha solving
-python download_extractor.py -k YOUR_KEY -l 3 "https://tv10.egydead.live/movie/"
-
-# Debug mode
-python download_extractor.py -d -k YOUR_KEY "https://tv10.egydead.live/movie/"
+GET /extract?url=https://tv10.egydead.live/movie-name/&limit=5
 ```
 
-## Getting a 2Captcha API Key
+### Response
 
-1. Sign up at https://2captcha.com
-2. Add funds to your account (~$3 for 1000 captchas)
-3. Copy your API key from the dashboard
-4. Use it with the `-k` flag or set `CAPTCHA_API_KEY` environment variable
+```json
+{
+  "success": true,
+  "message": "Extracted 3 links (3 direct)",
+  "url": "https://tv10.egydead.live/avatar-3-fire-and-ash-2025-1080p-bluray/",
+  "movie": {
+    "title": "Avatar 3 Fire And Ash 2025",
+    "year": "2025",
+    "quality": "1080P",
+    "image": null,
+    "genres": []
+  },
+  "download_links": [
+    {
+      "host": "streamruby.com",
+      "direct_link": "https://streamruby.com/cdn-cgi/content?id=...",
+      "is_direct": true
+    },
+    {
+      "host": "hgcloud.to",
+      "direct_link": "https://...premilkyway.com/.../Movie.1080p.BluRay.mp4?t=...",
+      "is_direct": true
+    }
+  ],
+  "total_links": 3,
+  "direct_links_count": 3
+}
+```
 
-## How It Works
+## 🔧 How It Works
 
 ```
 Movie Page (egydead.live)
-    ↓ Find "حمل الان" links
-Host Page (streamruby, hgcloud, etc.)
-    ↓ Find quality/download link
-    ↓ Follow intermediate pages
-Final Page (captcha protected)
-    ↓ Solve reCAPTCHA via 2Captcha
-Direct Download Link (premilkyway.com, cdn, etc.)
+    ↓ Click "المشاهده والتحميل" button
+    ↓ Find all "حمل الان" links
+Host Pages (streamruby, hgcloud, etc.)
+    ↓ Navigate through quality/download pages
+    ↓ Extract hidden CDN links from HTML/JS
+Direct Download Links (premilkyway.com, cdn, etc.)
 ```
 
-## Example Output
+## 🖥️ Requirements
+
+- Python 3.8+
+- Chrome browser installed
+- ChromeDriver (auto-managed by selenium)
+
+## 📦 Dependencies
 
 ```
-STEP 1: Finding 'حمل الان' download links
-Found 14 download link(s)
-
-STEP 2: Finding quality/download link
-Found download item link: https://hgcloud.to/f/ziff8kioqzbk_n
-
-STEP 3: Extracting final download link
-[CAPTCHA] Found reCAPTCHA v3
-[2CAPTCHA] Submitting reCAPTCHA v3...
-[2CAPTCHA] Captcha ID: 12345678
-[2CAPTCHA] Waiting for solution...
-[2CAPTCHA] ✓ Captcha solved!
-
-✓ DOWNLOAD LINK FOUND AFTER CAPTCHA:
-  https://yhqd4yg264.premilkyway.com/vp/01/.../file.mp4?t=...
-
-FINAL RESULTS
-1. https://yhqd4yg264.premilkyway.com/vp/01/.../file.mp4?t=...
+fastapi
+uvicorn
+selenium
+beautifulsoup4
+requests
 ```
 
-## Cost
+**Optional (for better anti-detection):**
 
-2Captcha pricing (as of 2024):
+```
+undetected-chromedriver
+```
 
-- reCAPTCHA v2: ~$2.99 per 1000 solves
-- reCAPTCHA v3: ~$2.99 per 1000 solves
+## 🚀 Deployment
 
-Each download link requires 1 captcha solve.
+> ⚠️ **Note:** This API uses Selenium which requires a browser. It won't work on serverless platforms like Vercel.
 
-## Requirements
+### Recommended Platforms:
 
-- Python 3.7+
-- Chrome browser
-- 2Captcha API key (for automatic captcha solving)
+- **Railway** (free tier) - supports Docker
+- **Render** (free tier) - supports Docker
+- **VPS** (DigitalOcean, Linode, etc.)
+
+## 📄 License
+
+MIT
+
+## 👤 Author
+
+[Walidhamdy44](https://github.com/Walidhamdy44)
