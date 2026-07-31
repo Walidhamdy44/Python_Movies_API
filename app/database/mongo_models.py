@@ -5,38 +5,25 @@ MongoDB document helpers and utilities.
 from datetime import datetime
 from typing import Optional, List
 from bson import ObjectId
-from pydantic import BaseModel, Field
-from passlib.context import CryptContext
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
-class PyObjectId(ObjectId):
-    """Custom ObjectId type for Pydantic."""
-    
-    @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
-    
-    @classmethod
-    def validate(cls, v, info=None):
-        if not ObjectId.is_valid(v):
-            raise ValueError("Invalid ObjectId")
-        return ObjectId(v)
-    
-    @classmethod
-    def __get_pydantic_json_schema__(cls, schema, handler):
-        return {"type": "string"}
+import bcrypt
 
 
 def hash_password(password: str) -> str:
-    """Hash a password."""
-    return pwd_context.hash(password)
+    """Hash a password using bcrypt."""
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+    return hashed.decode('utf-8')
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password against hash."""
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return bcrypt.checkpw(
+            plain_password.encode('utf-8'), 
+            hashed_password.encode('utf-8')
+        )
+    except Exception:
+        return False
 
 
 def user_doc(email: str, username: str, password: str, is_admin: bool = False) -> dict:
@@ -78,7 +65,7 @@ def movie_doc(
         "description": description,
         "description_ar": description_ar,
         "download_links": [],
-        "views": "0",
+        "views": 0,
         "created_by": created_by,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
