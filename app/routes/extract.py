@@ -164,7 +164,7 @@ async def extract_wecima_links(
     - **include_watch_servers**: Also include streaming server URLs
     - **get_direct_links**: Process each host to get direct CDN URLs (default: true, slower)
     
-    With get_direct_links=true: Processes each host (abstream, dhcplay, etc.) to get actual CDN links.
+    With get_direct_links=true: Processes each host (dhcplay, hgcloud, etc.) to get actual CDN links.
     With get_direct_links=false: Returns intermediate host URLs only (fast).
     
     **Authentication**: Requires X-API-Key header if AUTH_ENABLED=true

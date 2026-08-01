@@ -499,118 +499,6 @@ class DownloadExtractor:
             logger.error(f"hgcloud extraction failed: {e}")
             return (url, False)
     
-    def _extract_abstream_link(self, sb, url: str) -> tuple:
-        """
-        Extract direct download link from abstream.to
-        
-        Flow:
-        1. Open initial page /d/xxxxx
-        2. Find and click quality link /d/xxxxx_n (or _h, _o)
-        3. Submit the download form
-        4. Extract the CDN link from response
-        
-        Note: This site uses proxycheck.io for VPN/proxy detection.
-        If VPN is detected, it redirects to /vpn.html
-        """
-        try:
-            logger.info(f"abstream: Opening {url}")
-            sb.open(url)
-            sb.sleep(3)
-            
-            html = sb.get_page_source()
-            current_url = sb.get_current_url()
-            
-            # Check for VPN block
-            if '/vpn.html' in current_url.lower() or '/blocked' in current_url.lower():
-                logger.warning("abstream: VPN/proxy detected - site blocked access")
-                return (url, False)
-            
-            # Check for Cloudflare
-            if 'Just a moment' in html:
-                logger.info("abstream: Waiting for Cloudflare...")
-                sb.sleep(settings.CLOUDFLARE_WAIT)
-                html = sb.get_page_source()
-            
-            # STEP 1: Find quality link (/d/xxxxx_n, _h, or _o)
-            quality_link = None
-            try:
-                links = sb.find_elements('a[href*="_n"], a[href*="_h"], a[href*="_o"]')
-                for link in links:
-                    href = link.get_attribute('href')
-                    if href and '/d/' in href:
-                        quality_link = href
-                        # Prefer higher quality
-                        if '_h' in href:
-                            break
-            except:
-                pass
-            
-            if not quality_link:
-                # Try regex
-                match = re.search(r'href=["\']([^"\']*?/d/[a-z0-9]+_[hno])["\']', html, re.I)
-                if match:
-                    quality_link = match.group(1)
-                    if not quality_link.startswith('http'):
-                        quality_link = f"https://abstream.to{quality_link}"
-            
-            if not quality_link:
-                logger.warning("abstream: No quality link found")
-                return (url, False)
-            
-            # STEP 2: Navigate to quality page
-            logger.info(f"abstream: Navigating to quality page: {quality_link}")
-            sb.open(quality_link)
-            sb.sleep(3)
-            
-            html = sb.get_page_source()
-            
-            # STEP 3: Submit the download form
-            logger.info("abstream: Looking for download form...")
-            try:
-                # Remove any overlay first
-                try:
-                    sb.execute_script("var overlay = document.getElementById('overlay'); if(overlay) overlay.style.display='none';")
-                except:
-                    pass
-                
-                # Find and click submit button
-                submit_btn = sb.find_element('form#F1 button, form button.submit-btn, button.btn-gradient')
-                submit_btn.click()
-                logger.info("abstream: Submitted download form")
-                sb.sleep(5)
-            except:
-                # Try JS form submit
-                try:
-                    sb.execute_script("document.getElementById('F1').submit();")
-                    sb.sleep(5)
-                except:
-                    logger.warning("abstream: Could not submit form")
-            
-            # STEP 4: Extract CDN link from response
-            html = sb.get_page_source()
-            
-            # Look for delucloud CDN or other CDN patterns
-            cdn_patterns = [
-                r'https?://[a-z0-9]+\.delucloud\.xyz/[^"\'<>\s]+\.mp4[^"\'<>\s]*',
-                r'https?://[a-z0-9]+\.abstream[a-z0-9]*\.(?:com|xyz|to)/[^"\'<>\s]+\.mp4[^"\'<>\s]*',
-                r'https?://[^"\'<>\s]+/v/\d+/\d+/[a-z0-9]+_[hno]/[^"\'<>\s]+\.mp4[^"\'<>\s]*',
-            ]
-            
-            for pattern in cdn_patterns:
-                matches = re.findall(pattern, html, re.I)
-                if matches:
-                    # Decode HTML entities
-                    clean_link = matches[0].replace('&amp;', '&')
-                    logger.info(f"abstream: Found CDN link: {clean_link}")
-                    return (clean_link, True)
-            
-            logger.warning("abstream: Could not find direct download link")
-            return (url, False)
-            
-        except Exception as e:
-            logger.error(f"abstream extraction failed: {e}")
-            return (url, False)
-    
     def _extract_final_link(self, sb, url: str) -> tuple:
         """Extract final download link. Returns (link, is_direct)."""
         host = urlparse(url).netloc.lower()
@@ -619,8 +507,6 @@ class DownloadExtractor:
             return self._extract_megaup_link(sb, url)
         elif 'streamruby' in host:
             return self._extract_streamruby_link(sb, url)
-        elif 'abstream' in host:
-            return self._extract_abstream_link(sb, url)
         elif any(x in host for x in ['hgcloud', 'premilkyway', 'dhcplay', 'hanerix', 'audinifer']):
             # dhcplay, hanerix, audinifer use the same system as hgcloud
             return self._extract_hgcloud_link(sb, url)
