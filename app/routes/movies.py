@@ -340,16 +340,17 @@ async def process_single_movie(url: str, admin_id: str, auto_extract: bool = Tru
     
     try:
         # Extract movie info from URL
-        def run_info_extraction():
+        def run_extraction():
             extractor = DownloadExtractor()
             if is_wecima_url(url):
-                return extractor.extract_wecima_info_only(url)
+                # Use extract_wecima with get_direct_links=True to get actual CDN links
+                return extractor.extract_wecima(url, limit=10, get_direct_links=auto_extract)
             else:
-                return extractor.extract_info_only(url)
+                return extractor.extract(url, limit=10)
         
         loop = asyncio.get_event_loop()
         executor = ThreadPoolExecutor(max_workers=1)
-        extract_result = await loop.run_in_executor(executor, run_info_extraction)
+        extract_result = await loop.run_in_executor(executor, run_extraction)
         
         if not extract_result.success:
             result["error"] = f"Failed to extract info: {extract_result.message}"
@@ -357,7 +358,7 @@ async def process_single_movie(url: str, admin_id: str, auto_extract: bool = Tru
         
         movie_info = extract_result.movie
         
-        # For wecima, download links are already included in the info extraction
+        # Download links are already processed with direct CDN URLs
         download_links = []
         if extract_result.download_links:
             download_links = [link.model_dump() for link in extract_result.download_links]
@@ -375,7 +376,7 @@ async def process_single_movie(url: str, admin_id: str, auto_extract: bool = Tru
             created_by=admin_id,
         )
         
-        # If we already have download links from wecima, add them
+        # Add download links
         if download_links:
             new_movie["download_links"] = download_links
         
@@ -385,29 +386,11 @@ async def process_single_movie(url: str, admin_id: str, auto_extract: bool = Tru
         result["success"] = True
         result["movie_id"] = movie_id
         result["title"] = movie_info.title if movie_info else "Unknown"
+        result["links_extracted"] = len(download_links)
         
-        # If we already got links from wecima, skip additional extraction
-        if download_links:
-            result["links_extracted"] = len(download_links)
-            return result
-        
-        # Auto extract download links if requested (for egydead)
-        if auto_extract:
-            try:
-                def run_link_extraction():
-                    extractor = DownloadExtractor()
-                    return extractor.extract(url, limit=10)
-                
-                link_result = await loop.run_in_executor(executor, run_link_extraction)
-                
-                if link_result.success and link_result.download_links:
-                    await db.movies.update_one(
-                        {"_id": insert_result.inserted_id},
-                        {"$set": {"download_links": [link.model_dump() for link in link_result.download_links]}}
-                    )
-                    result["links_extracted"] = len(link_result.download_links)
-            except Exception as e:
-                result["links_error"] = str(e)
+        # Count direct links
+        direct_count = sum(1 for link in download_links if link.get("is_direct", False))
+        result["direct_links"] = direct_count
         
         return result
         
@@ -474,10 +457,10 @@ async def bulk_create_movies(
             detail="No valid URLs provided"
         )
     
-    if len(urls) > 50:
+    if len(urls) > 500:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Maximum 50 URLs allowed per batch"
+            detail="Maximum 500 URLs allowed per batch"
         )
     
     # Create job
