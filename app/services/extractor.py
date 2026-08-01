@@ -272,45 +272,183 @@ class DownloadExtractor:
             return (url, False)
     
     def _extract_hgcloud_link(self, sb, url: str) -> tuple:
-        """Extract direct download link from hgcloud/premilkyway."""
+        """
+        Extract direct download link from hgcloud.to
+        
+        Flow:
+        1. First page: Click "Download" button (a.videoplayer-download)
+        2. Second page: Choose quality - click /f/xxxxx_n or /f/xxxxx_l link  
+        3. Third page: Has reCAPTCHA form, click submit button
+        4. Fourth page: Wait for countdown, get final CDN link (cdn-centaurus.com)
+        """
         try:
+            logger.info(f"hgcloud: Opening {url}")
             sb.open(url)
             sb.sleep(settings.CLOUDFLARE_WAIT)
             
             html = sb.get_page_source()
             
             if 'Just a moment' in html:
+                logger.info("hgcloud: Waiting for Cloudflare...")
                 sb.sleep(settings.CLOUDFLARE_EXTRA_WAIT)
                 html = sb.get_page_source()
             
-            # Look for premilkyway CDN link
-            pattern = r'https?://[a-z0-9]+\.premilkyway\.com[^"\'<>\s]+\.mp4[^"\'<>\s]*'
-            matches = re.findall(pattern, html, re.I)
+            # Check if we already have a CDN link on this page
+            cdn_pattern = r'https?://[a-zA-Z0-9]+\.cdn-centaurus\.com[^"\'<>\s]+'
+            matches = re.findall(cdn_pattern, html, re.I)
             if matches:
-                return (matches[0], True)
+                clean_link = matches[0].replace('&amp;', '&')
+                logger.info(f"hgcloud: Found CDN link directly: {clean_link}")
+                return (clean_link, True)
             
+            # Also check for premilkyway CDN (older pattern)
+            premilky_pattern = r'https?://[a-z0-9]+\.premilkyway\.com[^"\'<>\s]+\.mp4[^"\'<>\s]*'
+            matches = re.findall(premilky_pattern, html, re.I)
+            if matches:
+                clean_link = matches[0].replace('&amp;', '&')
+                logger.info(f"hgcloud: Found premilkyway link: {clean_link}")
+                return (clean_link, True)
+            
+            # STEP 1: Click the first Download button (videoplayer-download)
+            logger.info("hgcloud: Step 1 - Looking for videoplayer-download button")
             try:
-                btns = sb.find_elements('a.submit-btn, a.btn-gr, a.download-btn, a[class*="download"]')
-                for btn in btns:
-                    href = btn.get_attribute('href')
-                    if href and 'premilkyway' in href:
-                        return (href, True)
-                    
-                    text = btn.text.lower()
-                    if 'download' in text:
-                        btn.click()
-                        sb.sleep(6)
-                        break
-                
-                html = sb.get_page_source()
-                matches = re.findall(pattern, html, re.I)
-                if matches:
-                    return (matches[0], True)
-                    
-            except:
-                pass
+                download_btn = sb.find_element('a.videoplayer-download, a.btn-gr[href*="/f/"]')
+                href = download_btn.get_attribute('href')
+                logger.info(f"hgcloud: Found download button, href: {href}")
+                download_btn.click()
+                sb.sleep(5)
+            except Exception as e:
+                logger.warning(f"hgcloud: Step 1 button click failed: {e}")
+                # Try finding any link with /f/ pattern
+                try:
+                    f_links = sb.find_elements('a[href*="/f/"]')
+                    for link in f_links:
+                        href = link.get_attribute('href')
+                        if href and '/f/' in href:
+                            logger.info(f"hgcloud: Clicking /f/ link: {href}")
+                            link.click()
+                            sb.sleep(5)
+                            break
+                except:
+                    pass
             
+            html = sb.get_page_source()
+            
+            # Check for CDN link after step 1
+            matches = re.findall(cdn_pattern, html, re.I)
+            if matches:
+                clean_link = matches[0].replace('&amp;', '&')
+                logger.info(f"hgcloud: Found CDN link after step 1: {clean_link}")
+                return (clean_link, True)
+            
+            # STEP 2: Choose quality - click _n (normal) or _l (low) link
+            logger.info("hgcloud: Step 2 - Looking for quality selection links")
+            try:
+                # Look for downloadv-item links (quality selection)
+                quality_links = sb.find_elements('a.downloadv-item, a[href*="_n"], a[href*="_l"]')
+                for link in quality_links:
+                    href = link.get_attribute('href')
+                    if href and ('_n' in href or '_l' in href):
+                        logger.info(f"hgcloud: Clicking quality link: {href}")
+                        link.click()
+                        sb.sleep(5)
+                        break
+            except Exception as e:
+                logger.warning(f"hgcloud: Step 2 quality selection failed: {e}")
+            
+            html = sb.get_page_source()
+            
+            # Check for CDN link after step 2
+            matches = re.findall(cdn_pattern, html, re.I)
+            if matches:
+                clean_link = matches[0].replace('&amp;', '&')
+                logger.info(f"hgcloud: Found CDN link after step 2: {clean_link}")
+                return (clean_link, True)
+            
+            # STEP 3: Click reCAPTCHA submit button
+            logger.info("hgcloud: Step 3 - Looking for submit button (reCAPTCHA)")
+            try:
+                # The submit button has g-recaptcha class
+                submit_btn = sb.find_element('button.g-recaptcha, button.submit-btn, .g-recaptcha.btn')
+                logger.info("hgcloud: Found submit button, clicking...")
+                submit_btn.click()
+                sb.sleep(8)  # Wait for reCAPTCHA and page load
+            except Exception as e:
+                logger.warning(f"hgcloud: Step 3 submit button failed: {e}")
+                # Try JavaScript click
+                try:
+                    sb.execute_script("""
+                        var btn = document.querySelector('button.g-recaptcha, button.submit-btn');
+                        if (btn) btn.click();
+                    """)
+                    sb.sleep(8)
+                except:
+                    pass
+            
+            html = sb.get_page_source()
+            
+            # Check for CDN link after step 3
+            matches = re.findall(cdn_pattern, html, re.I)
+            if matches:
+                clean_link = matches[0].replace('&amp;', '&')
+                logger.info(f"hgcloud: Found CDN link after step 3: {clean_link}")
+                return (clean_link, True)
+            
+            # STEP 4: Wait for countdown and get final link
+            logger.info("hgcloud: Step 4 - Waiting for countdown timer...")
+            
+            # Wait up to 10 seconds for the countdown
+            for wait_sec in range(10):
+                sb.sleep(1)
+                html = sb.get_page_source()
+                
+                # Look for the final download link
+                matches = re.findall(cdn_pattern, html, re.I)
+                if matches:
+                    clean_link = matches[0].replace('&amp;', '&')
+                    logger.info(f"hgcloud: Found CDN link after countdown: {clean_link}")
+                    return (clean_link, True)
+                
+                # Check for premilkyway pattern too
+                matches = re.findall(premilky_pattern, html, re.I)
+                if matches:
+                    clean_link = matches[0].replace('&amp;', '&')
+                    logger.info(f"hgcloud: Found premilkyway link after countdown: {clean_link}")
+                    return (clean_link, True)
+                
+                # Also try to find submit-btn with actual download href
+                try:
+                    final_btn = sb.find_element('a.submit-btn[href*="cdn-centaurus"], a.btn-gr[href*="cdn-centaurus"], a.submit-btn[href*="premilkyway"], a.btn-gr[href*="premilkyway"]')
+                    href = final_btn.get_attribute('href')
+                    if href and ('cdn-centaurus' in href or 'premilkyway' in href):
+                        clean_link = href.replace('&amp;', '&')
+                        logger.info(f"hgcloud: Found final download button: {clean_link}")
+                        return (clean_link, True)
+                except:
+                    pass
+            
+            # Final attempt - check page source for any CDN patterns
+            html = sb.get_page_source()
+            
+            # Try multiple CDN patterns
+            cdn_patterns = [
+                r'https?://[a-zA-Z0-9]+\.cdn-centaurus\.com[^"\'<>\s]+',
+                r'https?://[a-z0-9]+\.premilkyway\.com[^"\'<>\s]+\.mp4[^"\'<>\s]*',
+                r'href=["\']?(https?://[^"\'<>\s]+\.mp4[^"\'<>\s]*)["\']?',
+            ]
+            
+            for pattern in cdn_patterns:
+                matches = re.findall(pattern, html, re.I)
+                for match in matches:
+                    if 'hgcloud' not in match and 'cloudflare' not in match:
+                        # Decode HTML entities (e.g., &amp; -> &)
+                        clean_match = match.replace('&amp;', '&')
+                        logger.info(f"hgcloud: Found download link: {clean_match}")
+                        return (clean_match, True)
+            
+            logger.warning("hgcloud: Could not find direct download link")
             return (url, False)
+            
         except Exception as e:
             logger.error(f"hgcloud extraction failed: {e}")
             return (url, False)
