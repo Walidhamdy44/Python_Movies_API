@@ -3,6 +3,7 @@ Download link extraction service using SeleniumBase.
 """
 
 import re
+import base64
 import logging
 from urllib.parse import urljoin, urlparse, unquote
 from bs4 import BeautifulSoup
@@ -18,6 +19,45 @@ try:
     SELENIUMBASE_AVAILABLE = True
 except ImportError:
     SELENIUMBASE_AVAILABLE = False
+
+
+def decode_wecima_url(encoded: str) -> str:
+    """
+    Decode wecima's custom base64 encoded URLs.
+    
+    Wecima encoding scheme:
+    1. Removes 'aHR0c' prefix (base64 for 'https') from the standard base64
+    2. Inserts '+' characters at certain positions
+    
+    To decode:
+    1. Remove the '+' separator characters
+    2. Prepend 'aHR0cH' to restore the 'https:' prefix
+    3. Decode as standard base64
+    
+    Example: "HM6Ly9sdWx1c3Ry+ZWFtLmNvbS9lL3+VwZjJpa254ODkxZQ==" 
+    -> "https://lulustream.com/e/upf2iknx891e"
+    """
+    try:
+        if not encoded:
+            return None
+            
+        # Step 1: Remove the '+' separators
+        cleaned = encoded.replace('+', '')
+        
+        # Step 2: Prepend the missing 'aHR0cH' prefix (base64 for 'https:')
+        # The encoded string starts with 'H' which should be 'aHR0cH' for 'https:'
+        if cleaned.startswith('H'):
+            fixed = 'aHR0cH' + cleaned[1:]
+        else:
+            fixed = cleaned
+        
+        # Step 3: Decode base64
+        decoded = base64.b64decode(fixed).decode('utf-8')
+        
+        return decoded
+    except Exception as e:
+        logger.error(f"Failed to decode wecima URL '{encoded}': {e}")
+        return None
 
 
 class DownloadExtractor:
@@ -341,17 +381,23 @@ class DownloadExtractor:
                 logger.info(f"hgcloud: Found CDN link after step 1: {clean_link}")
                 return (clean_link, True)
             
-            # STEP 2: Choose quality - click _n (normal) or _l (low) link
+            # STEP 2: Choose quality - click _o (original), _n (normal) or _l (low) link
             logger.info("hgcloud: Step 2 - Looking for quality selection links")
             try:
                 # Look for downloadv-item links (quality selection)
-                quality_links = sb.find_elements('a.downloadv-item, a[href*="_n"], a[href*="_l"]')
-                for link in quality_links:
-                    href = link.get_attribute('href')
-                    if href and ('_n' in href or '_l' in href):
-                        logger.info(f"hgcloud: Clicking quality link: {href}")
-                        link.click()
-                        sb.sleep(5)
+                # Priority: _o (original) > _n (normal) > _l (low)
+                quality_links = sb.find_elements('a.downloadv-item, a[href*="_o"], a[href*="_n"], a[href*="_l"]')
+                clicked = False
+                for suffix in ['_o', '_n', '_l']:
+                    for link in quality_links:
+                        href = link.get_attribute('href')
+                        if href and suffix in href:
+                            logger.info(f"hgcloud: Clicking quality link: {href}")
+                            link.click()
+                            sb.sleep(5)
+                            clicked = True
+                            break
+                    if clicked:
                         break
             except Exception as e:
                 logger.warning(f"hgcloud: Step 2 quality selection failed: {e}")
@@ -461,10 +507,61 @@ class DownloadExtractor:
             return self._extract_megaup_link(sb, url)
         elif 'streamruby' in host:
             return self._extract_streamruby_link(sb, url)
-        elif 'hgcloud' in host or 'premilkyway' in host:
+        elif any(x in host for x in ['hgcloud', 'premilkyway', 'dhcplay', 'hanerix', 'audinifer']):
+            # dhcplay, hanerix, audinifer use the same system as hgcloud
             return self._extract_hgcloud_link(sb, url)
+        elif any(x in host for x in ['lulustream', 'luluvdo']):
+            return self._extract_lulustream_link(sb, url)
         else:
             return self._extract_generic_link(sb, url)
+    
+    def _extract_lulustream_link(self, sb, url: str) -> tuple:
+        """
+        Extract download link from lulustream/luluvdo.
+        These sites have quality variants like _h (HD), _n (normal), _l (low).
+        """
+        try:
+            logger.info(f"lulustream: Opening {url}")
+            sb.open(url)
+            sb.sleep(settings.CLOUDFLARE_WAIT)
+            
+            html = sb.get_page_source()
+            
+            if 'Just a moment' in html:
+                logger.info("lulustream: Waiting for Cloudflare...")
+                sb.sleep(settings.CLOUDFLARE_EXTRA_WAIT)
+                html = sb.get_page_source()
+            
+            # Look for quality variant links (_h for HD, _n for normal)
+            quality_pattern = r'https?://(?:lulustream|luluvdo)\.com/d/[a-z0-9]+_[hno]'
+            matches = re.findall(quality_pattern, html, re.I)
+            
+            if matches:
+                # Prefer HD (_h) variant
+                hd_links = [m for m in matches if '_h' in m]
+                if hd_links:
+                    logger.info(f"lulustream: Found HD link: {hd_links[0]}")
+                    return (hd_links[0], False)  # Not direct CDN, but best quality variant
+                return (matches[0], False)
+            
+            # Try to find any download button with href
+            try:
+                dl_btns = sb.find_elements('a[href*="_h"], a[href*="_n"], a[href*="_o"]')
+                for btn in dl_btns:
+                    href = btn.get_attribute('href')
+                    if href and ('lulustream' in href or 'luluvdo' in href):
+                        logger.info(f"lulustream: Found quality button: {href}")
+                        return (href, False)
+            except:
+                pass
+            
+            # Return original URL if no quality variants found
+            logger.warning("lulustream: No quality variants found")
+            return (url, False)
+            
+        except Exception as e:
+            logger.error(f"lulustream extraction failed: {e}")
+            return (url, False)
     
     def _extract_generic_link(self, sb, url: str) -> tuple:
         """Generic extraction for unknown hosts."""
@@ -494,6 +591,364 @@ class DownloadExtractor:
         except Exception as e:
             logger.error(f"generic extraction failed: {e}")
             return (url, False)
+    
+    # ============== WECIMA EXTRACTION METHODS ==============
+    
+    def _extract_wecima_movie_info(self, html: str, url: str) -> MovieInfo:
+        """Extract movie information from wecima.cx page HTML."""
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        title = ""
+        
+        # Method 1: og:title meta tag
+        og_title = soup.find('meta', property='og:title')
+        if og_title and og_title.get('content'):
+            title = og_title['content'].strip()
+        
+        # Method 2: page title
+        if not title:
+            page_title = soup.find('title')
+            if page_title:
+                title = page_title.get_text(strip=True).split('|')[0].split('-')[0].strip()
+        
+        # Method 3: h1 element
+        if not title:
+            h1 = soup.select_one('h1')
+            if h1:
+                title = h1.get_text(strip=True)
+        
+        # Clean up title - remove common prefixes
+        if title:
+            title = re.sub(r'^(مشاهده|مشاهدة)\s*(فيلم)?\s*', '', title, flags=re.I).strip()
+            title = re.sub(r'\s*مترجم\s*$', '', title, flags=re.I).strip()
+            # Remove "Wecima" suffix if present
+            title = re.sub(r'\s*-?\s*Wecima.*$', '', title, flags=re.I).strip()
+        
+        # Year - extract from title or URL
+        year = None
+        year_match = re.search(r'(19|20)\d{2}', url + (title or ''))
+        if year_match:
+            year = year_match.group(0)
+        
+        # Image/Poster - try og:image first
+        image = None
+        og_image = soup.find('meta', property='og:image')
+        if og_image and og_image.get('content'):
+            image = og_image['content']
+        
+        # Try other image selectors
+        if not image:
+            img_selectors = [
+                '.Poster img', '.poster img', '.movie-poster img',
+                'img.poster', 'img[itemprop="image"]',
+                '.film-poster img', '.cover img'
+            ]
+            for selector in img_selectors:
+                img = soup.select_one(selector)
+                if img:
+                    src = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
+                    if src and 'logo' not in src.lower():
+                        image = urljoin(url, src)
+                        break
+        
+        # Story/Description
+        description = None
+        story_elem = soup.select_one('.StoryMovieContent')
+        if story_elem:
+            description = story_elem.get_text(strip=True)
+        
+        # Quality from download links
+        quality = None
+        quality_elem = soup.select_one('.download-item .resolution')
+        if quality_elem:
+            quality = quality_elem.get_text(strip=True)
+        
+        # Rating
+        rating = None
+        rating_elem = soup.select_one('.imdb-rating, [class*="rating"] span, .Rating span')
+        if rating_elem:
+            rating_text = rating_elem.get_text(strip=True)
+            r_match = re.search(r'[\d.]+', rating_text)
+            if r_match:
+                rating = r_match.group(0)
+        
+        # Duration
+        duration = None
+        duration_elem = soup.select_one('.runtime, .duration, [class*="duration"]')
+        if duration_elem:
+            duration = duration_elem.get_text(strip=True)
+        
+        # Genres
+        genres = []
+        genre_selectors = ['.genres a', '.genre a', 'a[href*="/genre/"]', 'a[href*="/category/"]']
+        for selector in genre_selectors:
+            genre_links = soup.select(selector)
+            for g in genre_links[:5]:
+                text = g.get_text(strip=True)
+                if text and len(text) < 30:
+                    genres.append(text)
+            if genres:
+                break
+        
+        return MovieInfo(
+            title=title or "Unknown",
+            year=year,
+            image=image,
+            quality=quality,
+            rating=rating,
+            duration=duration,
+            genres=list(set(genres))[:5]
+        )
+    
+    def _find_wecima_download_links(self, html: str) -> list:
+        """
+        Find all download links from wecima.cx page.
+        Returns list of dicts with: url, resolution, size, quality
+        """
+        soup = BeautifulSoup(html, 'html.parser')
+        links = []
+        
+        # Find download items with data-href attribute
+        download_items = soup.select('li.download-item[data-href]')
+        
+        for item in download_items:
+            encoded_url = item.get('data-href')
+            if not encoded_url:
+                continue
+            
+            # Decode the URL
+            decoded_url = decode_wecima_url(encoded_url)
+            if not decoded_url:
+                continue
+            
+            # Get quality info
+            resolution = ""
+            size = ""
+            quality_type = ""
+            
+            resolution_elem = item.select_one('.resolution')
+            if resolution_elem:
+                resolution = resolution_elem.get_text(strip=True)
+            
+            size_elem = item.select_one('.size')
+            if size_elem:
+                size = size_elem.get_text(strip=True)
+            
+            quality_elem = item.select_one('.quality')
+            if quality_elem:
+                quality_type = quality_elem.get_text(strip=True)
+            
+            links.append({
+                'url': decoded_url,
+                'resolution': resolution,
+                'size': size,
+                'quality_type': quality_type,
+                'quality_label': f"{resolution} {quality_type}".strip() if resolution else quality_type
+            })
+        
+        return links
+    
+    def _find_wecima_watch_servers(self, html: str) -> list:
+        """
+        Find all watch/streaming servers from wecima.cx page.
+        Returns list of dicts with: url, server_name
+        """
+        soup = BeautifulSoup(html, 'html.parser')
+        servers = []
+        
+        # Find server buttons with data-url attribute
+        server_btns = soup.select('.WatchServersList btn[data-url]')
+        
+        for btn in server_btns:
+            encoded_url = btn.get('data-url')
+            if not encoded_url:
+                continue
+            
+            # Decode the URL
+            decoded_url = decode_wecima_url(encoded_url)
+            if not decoded_url:
+                continue
+            
+            # Get server name
+            server_name = "Unknown Server"
+            strong_elem = btn.select_one('strong')
+            if strong_elem:
+                server_name = strong_elem.get_text(strip=True)
+            
+            servers.append({
+                'url': decoded_url,
+                'server_name': server_name
+            })
+        
+        return servers
+    
+    def is_wecima_url(self, url: str) -> bool:
+        """Check if URL is from wecima.cx domain."""
+        host = urlparse(url).netloc.lower()
+        return 'wecima' in host
+    
+    def extract_wecima(self, url: str, include_watch_servers: bool = False, limit: int = None) -> ExtractResponse:
+        """
+        Extract download links from wecima.cx page.
+        
+        Args:
+            url: Wecima movie page URL
+            include_watch_servers: Whether to also extract streaming server URLs
+            limit: Max number of download links to return
+            
+        Returns:
+            ExtractResponse with movie info and download links
+        """
+        if not SELENIUMBASE_AVAILABLE:
+            return ExtractResponse(
+                success=False,
+                message="SeleniumBase not installed",
+                url=url
+            )
+        
+        try:
+            with SB(uc=True, headless=True) as sb:
+                logger.info(f"[WECIMA] Loading: {url}")
+                
+                sb.open(url)
+                sb.sleep(settings.PAGE_LOAD_WAIT)
+                
+                html = sb.get_page_source()
+                title = sb.get_title()
+                
+                # Check if Cloudflare challenge
+                if 'Just a moment' in html or 'Just a moment' in title:
+                    logger.info("[WECIMA] Waiting for Cloudflare...")
+                    sb.sleep(settings.CLOUDFLARE_WAIT)
+                    html = sb.get_page_source()
+                
+                # Extract movie info
+                movie_info = self._extract_wecima_movie_info(html, url)
+                logger.info(f"[WECIMA] Movie: {movie_info.title}")
+                
+                # Extract download links
+                wecima_downloads = self._find_wecima_download_links(html)
+                logger.info(f"[WECIMA] Found {len(wecima_downloads)} download links")
+                
+                # Optionally extract watch servers
+                watch_servers = []
+                if include_watch_servers:
+                    watch_servers = self._find_wecima_watch_servers(html)
+                    logger.info(f"[WECIMA] Found {len(watch_servers)} watch servers")
+                
+                # Apply limit
+                if limit and len(wecima_downloads) > limit:
+                    wecima_downloads = wecima_downloads[:limit]
+                
+                # Convert to DownloadLink objects
+                download_links = []
+                for dl in wecima_downloads:
+                    host = urlparse(dl['url']).netloc or "unknown"
+                    download_links.append(DownloadLink(
+                        host=host,
+                        quality=dl.get('quality_label') or dl.get('resolution'),
+                        direct_link=dl['url'],
+                        is_direct=False  # These are intermediate links, not direct CDN links
+                    ))
+                
+                # Add watch servers as well if requested
+                if include_watch_servers:
+                    for server in watch_servers:
+                        host = urlparse(server['url']).netloc or "unknown"
+                        download_links.append(DownloadLink(
+                            host=host,
+                            quality=f"Stream: {server['server_name']}",
+                            direct_link=server['url'],
+                            is_direct=False
+                        ))
+                
+                return ExtractResponse(
+                    success=True,
+                    message=f"Extracted {len(wecima_downloads)} download links" + 
+                            (f" and {len(watch_servers)} watch servers" if include_watch_servers else ""),
+                    url=url,
+                    movie=movie_info,
+                    download_links=download_links,
+                    total_links=len(download_links),
+                    direct_links_count=0  # Wecima links are not direct CDN links
+                )
+                
+        except Exception as e:
+            logger.exception(f"[WECIMA] Extraction failed: {e}")
+            return ExtractResponse(
+                success=False,
+                message=f"Error: {str(e)}",
+                url=url
+            )
+    
+    def extract_wecima_info_only(self, url: str) -> ExtractResponse:
+        """
+        FAST extraction for wecima - movie info only, no Selenium needed for decoding.
+        
+        Args:
+            url: Wecima movie page URL
+            
+        Returns:
+            ExtractResponse with movie info and decoded download links
+        """
+        if not SELENIUMBASE_AVAILABLE:
+            return ExtractResponse(
+                success=False,
+                message="SeleniumBase not installed",
+                url=url
+            )
+        
+        try:
+            with SB(uc=True, headless=True) as sb:
+                logger.info(f"[WECIMA-FAST] Loading: {url}")
+                
+                sb.open(url)
+                sb.sleep(settings.PAGE_LOAD_WAIT)
+                
+                html = sb.get_page_source()
+                title = sb.get_title()
+                
+                # Check if Cloudflare challenge
+                if 'Just a moment' in html or 'Just a moment' in title:
+                    logger.info("[WECIMA-FAST] Waiting for Cloudflare...")
+                    sb.sleep(settings.CLOUDFLARE_WAIT)
+                    html = sb.get_page_source()
+                
+                # Extract movie info
+                movie_info = self._extract_wecima_movie_info(html, url)
+                logger.info(f"[WECIMA-FAST] Movie: {movie_info.title}")
+                
+                # Extract and decode download links (this is fast since it's just parsing)
+                wecima_downloads = self._find_wecima_download_links(html)
+                
+                # Convert to DownloadLink objects
+                download_links = []
+                for dl in wecima_downloads:
+                    host = urlparse(dl['url']).netloc or "unknown"
+                    download_links.append(DownloadLink(
+                        host=host,
+                        quality=dl.get('quality_label') or dl.get('resolution'),
+                        direct_link=dl['url'],
+                        is_direct=False
+                    ))
+                
+                return ExtractResponse(
+                    success=True,
+                    message=f"Movie info extracted with {len(download_links)} download links",
+                    url=url,
+                    movie=movie_info,
+                    download_links=download_links,
+                    total_links=len(download_links),
+                    direct_links_count=0
+                )
+                
+        except Exception as e:
+            logger.exception(f"[WECIMA-FAST] Extraction failed: {e}")
+            return ExtractResponse(
+                success=False,
+                message=f"Error: {str(e)}",
+                url=url
+            )
     
     def extract_info_only(self, url: str) -> ExtractResponse:
         """

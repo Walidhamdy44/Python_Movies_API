@@ -248,6 +248,7 @@ async def extract_movie_links(
     """Extract download links for a movie. Admin only."""
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
+    from urllib.parse import urlparse
     from app.services import DownloadExtractor
     
     db = get_database()
@@ -268,10 +269,21 @@ async def extract_movie_links(
             detail="Movie not found"
         )
     
+    movie_url = movie["movie_url"]
+    
+    # Auto-detect website type
+    def is_wecima_url(url: str) -> bool:
+        host = urlparse(url).netloc.lower()
+        return 'wecima' in host
+    
     # Run extraction in thread pool to avoid blocking async loop
     def run_extraction():
         extractor = DownloadExtractor()
-        return extractor.extract(movie["movie_url"], limit=limit)
+        # Use appropriate extraction method based on website
+        if is_wecima_url(movie_url):
+            return extractor.extract_wecima(movie_url, limit=limit)
+        else:
+            return extractor.extract(movie_url, limit=limit)
     
     loop = asyncio.get_event_loop()
     executor = ThreadPoolExecutor(max_workers=1)
@@ -309,6 +321,7 @@ async def extract_movie_links(
 async def process_single_movie(url: str, admin_id: str, auto_extract: bool = True) -> dict:
     """Process a single movie URL - extract info and create movie."""
     from concurrent.futures import ThreadPoolExecutor
+    from urllib.parse import urlparse
     from app.services import DownloadExtractor
     
     db = get_database()
@@ -319,11 +332,19 @@ async def process_single_movie(url: str, admin_id: str, auto_extract: bool = Tru
         "error": None
     }
     
+    # Auto-detect website type
+    def is_wecima_url(u: str) -> bool:
+        host = urlparse(u).netloc.lower()
+        return 'wecima' in host
+    
     try:
         # Extract movie info from URL
         def run_info_extraction():
             extractor = DownloadExtractor()
-            return extractor.extract_info_only(url)
+            if is_wecima_url(url):
+                return extractor.extract_wecima_info_only(url)
+            else:
+                return extractor.extract_info_only(url)
         
         loop = asyncio.get_event_loop()
         executor = ThreadPoolExecutor(max_workers=1)
@@ -334,6 +355,11 @@ async def process_single_movie(url: str, admin_id: str, auto_extract: bool = Tru
             return result
         
         movie_info = extract_result.movie
+        
+        # For wecima, download links are already included in the info extraction
+        download_links = []
+        if extract_result.download_links:
+            download_links = [link.model_dump() for link in extract_result.download_links]
         
         # Create the movie
         new_movie = movie_doc(
@@ -348,6 +374,10 @@ async def process_single_movie(url: str, admin_id: str, auto_extract: bool = Tru
             created_by=admin_id,
         )
         
+        # If we already have download links from wecima, add them
+        if download_links:
+            new_movie["download_links"] = download_links
+        
         insert_result = await db.movies.insert_one(new_movie)
         movie_id = str(insert_result.inserted_id)
         
@@ -355,7 +385,12 @@ async def process_single_movie(url: str, admin_id: str, auto_extract: bool = Tru
         result["movie_id"] = movie_id
         result["title"] = movie_info.title if movie_info else "Unknown"
         
-        # Auto extract download links if requested
+        # If we already got links from wecima, skip additional extraction
+        if download_links:
+            result["links_extracted"] = len(download_links)
+            return result
+        
+        # Auto extract download links if requested (for egydead)
         if auto_extract:
             try:
                 def run_link_extraction():
