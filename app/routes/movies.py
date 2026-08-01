@@ -243,6 +243,7 @@ async def delete_movie(
 async def extract_movie_links(
     movie_id: str,
     limit: int = Query(10, ge=1, le=20, description="Max links to extract"),
+    get_direct_links: bool = Query(True, description="Process host links to get direct CDN URLs"),
     admin: dict = Depends(get_current_admin),
 ):
     """Extract download links for a movie. Admin only."""
@@ -281,7 +282,7 @@ async def extract_movie_links(
         extractor = DownloadExtractor()
         # Use appropriate extraction method based on website
         if is_wecima_url(movie_url):
-            return extractor.extract_wecima(movie_url, limit=limit)
+            return extractor.extract_wecima(movie_url, limit=limit, get_direct_links=get_direct_links)
         else:
             return extractor.extract(movie_url, limit=limit)
     
