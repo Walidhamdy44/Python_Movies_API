@@ -901,7 +901,7 @@ class DownloadExtractor:
         host = urlparse(url).netloc.lower()
         return 'wecima' in host
     
-    def extract_wecima(self, url: str, include_watch_servers: bool = False, limit: int = None) -> ExtractResponse:
+    def extract_wecima(self, url: str, include_watch_servers: bool = False, limit: int = None, get_direct_links: bool = False) -> ExtractResponse:
         """
         Extract download links from wecima.cx page.
         
@@ -909,6 +909,7 @@ class DownloadExtractor:
             url: Wecima movie page URL
             include_watch_servers: Whether to also extract streaming server URLs
             limit: Max number of download links to return
+            get_direct_links: If True, process each host link to get direct CDN URLs (SLOW)
             
         Returns:
             ExtractResponse with movie info and download links
@@ -956,14 +957,42 @@ class DownloadExtractor:
                 
                 # Convert to DownloadLink objects
                 download_links = []
+                direct_count = 0
+                
                 for dl in wecima_downloads:
                     host = urlparse(dl['url']).netloc or "unknown"
-                    download_links.append(DownloadLink(
-                        host=host,
-                        quality=dl.get('quality_label') or dl.get('resolution'),
-                        direct_link=dl['url'],
-                        is_direct=False  # These are intermediate links, not direct CDN links
-                    ))
+                    quality = dl.get('quality_label') or dl.get('resolution')
+                    intermediate_url = dl['url']
+                    
+                    if get_direct_links:
+                        # Process each link to get direct CDN URL
+                        logger.info(f"[WECIMA] Processing {host} for direct link...")
+                        try:
+                            final_link, is_direct = self._extract_final_link(sb, intermediate_url)
+                            download_links.append(DownloadLink(
+                                host=host,
+                                quality=quality,
+                                direct_link=final_link,
+                                is_direct=is_direct
+                            ))
+                            if is_direct:
+                                direct_count += 1
+                        except Exception as e:
+                            logger.error(f"[WECIMA] Failed to process {host}: {e}")
+                            download_links.append(DownloadLink(
+                                host=host,
+                                quality=quality,
+                                direct_link=intermediate_url,
+                                is_direct=False
+                            ))
+                    else:
+                        # Just return intermediate links
+                        download_links.append(DownloadLink(
+                            host=host,
+                            quality=quality,
+                            direct_link=intermediate_url,
+                            is_direct=False
+                        ))
                 
                 # Add watch servers as well if requested
                 if include_watch_servers:
@@ -978,13 +1007,13 @@ class DownloadExtractor:
                 
                 return ExtractResponse(
                     success=True,
-                    message=f"Extracted {len(wecima_downloads)} download links" + 
+                    message=f"Extracted {len(wecima_downloads)} download links ({direct_count} direct)" + 
                             (f" and {len(watch_servers)} watch servers" if include_watch_servers else ""),
                     url=url,
                     movie=movie_info,
                     download_links=download_links,
                     total_links=len(download_links),
-                    direct_links_count=0  # Wecima links are not direct CDN links
+                    direct_links_count=direct_count
                 )
                 
         except Exception as e:

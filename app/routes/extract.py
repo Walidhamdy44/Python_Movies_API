@@ -83,6 +83,10 @@ async def extract_links(
         False,
         description="For wecima: also include streaming server URLs"
     ),
+    get_direct_links: Optional[bool] = Query(
+        True,
+        description="Process host links to get direct CDN URLs (slower but gives actual download links)"
+    ),
     api_key: str = Depends(verify_api_key)
 ):
     """
@@ -92,9 +96,10 @@ async def extract_links(
     - **url**: The movie page URL (e.g., https://tv10.egydead.live/... or https://wecima.cx/watch/...)
     - **limit**: Optional limit on number of download links to process
     - **include_watch_servers**: (wecima only) Also include streaming server URLs
+    - **get_direct_links**: Process each host link to get direct CDN URLs (default: true)
     
     For egydead: Slow (2-5 min) - processes each download link to get direct CDN links.
-    For wecima: Fast - decodes base64 links directly from page HTML.
+    For wecima: Fast with get_direct_links=false, Slow with get_direct_links=true.
     
     **Authentication**: Requires X-API-Key header if AUTH_ENABLED=true
     """
@@ -108,7 +113,12 @@ async def extract_links(
         extractor = DownloadExtractor()
         # Auto-detect website and use appropriate handler
         if is_wecima_url(url):
-            return extractor.extract_wecima(url, include_watch_servers=include_watch_servers, limit=limit)
+            return extractor.extract_wecima(
+                url, 
+                include_watch_servers=include_watch_servers, 
+                limit=limit,
+                get_direct_links=get_direct_links
+            )
         else:
             return extractor.extract(url, limit=limit)
     
@@ -143,19 +153,19 @@ async def extract_wecima_links(
     url: str = Query(..., description="Wecima movie page URL"),
     limit: Optional[int] = Query(None, description="Limit number of links", ge=1, le=50),
     include_watch_servers: bool = Query(False, description="Also include streaming server URLs"),
+    get_direct_links: bool = Query(True, description="Process host links to get direct CDN URLs"),
     api_key: str = Depends(verify_api_key)
 ):
     """
-    Extract download links from wecima.cx page (FAST).
-    
-    Wecima uses base64-encoded URLs that can be decoded directly from page HTML,
-    so this is much faster than egydead extraction.
+    Extract download links from wecima.cx page.
     
     - **url**: The wecima movie page URL (e.g., https://wecima.cx/watch/...)
     - **limit**: Optional limit on number of download links
     - **include_watch_servers**: Also include streaming server URLs
+    - **get_direct_links**: Process each host to get direct CDN URLs (default: true, slower)
     
-    Returns movie info and all decoded download links.
+    With get_direct_links=true: Processes each host (abstream, dhcplay, etc.) to get actual CDN links.
+    With get_direct_links=false: Returns intermediate host URLs only (fast).
     
     **Authentication**: Requires X-API-Key header if AUTH_ENABLED=true
     """
@@ -170,7 +180,12 @@ async def extract_wecima_links(
     
     def run_extraction():
         extractor = DownloadExtractor()
-        return extractor.extract_wecima(url, include_watch_servers=include_watch_servers, limit=limit)
+        return extractor.extract_wecima(
+            url, 
+            include_watch_servers=include_watch_servers, 
+            limit=limit,
+            get_direct_links=get_direct_links
+        )
     
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(executor, run_extraction)
