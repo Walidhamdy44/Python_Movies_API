@@ -45,19 +45,29 @@ def decode_wecima_url(encoded: str) -> str:
 class DownloadExtractor:
     """
     Extracts download links from wecima.cx.
-    Only processes supported hosts (dhcplay, hgcloud, etc.)
+    Supports multiple hosts including dhcplay, hgcloud, doodstream, mixdrop, etc.
     """
     
-    # Hosts that we support (all use the same extraction method)
+    # Hosts that we support for direct link extraction
     SUPPORTED_HOSTS = ['dhcplay', 'hgcloud', 'audinifer', 'hanerix', 'premilkyway']
+    
+    # All hosts we accept (even without direct extraction)
+    ALL_ACCEPTED_HOSTS = ['dhcplay', 'hgcloud', 'audinifer', 'hanerix', 'premilkyway', 
+                          'doodstream', 'mixdrop', 'lulustream', 'abstream', 'streamwish',
+                          'vidhide', 'filemoon', 'streamtape']
     
     def __init__(self):
         pass
     
     def _is_supported_host(self, url: str) -> bool:
-        """Check if URL is from a supported host."""
+        """Check if URL is from a supported host for direct extraction."""
         host = urlparse(url).netloc.lower()
         return any(h in host for h in self.SUPPORTED_HOSTS)
+    
+    def _is_accepted_host(self, url: str) -> bool:
+        """Check if URL is from any accepted host."""
+        host = urlparse(url).netloc.lower()
+        return any(h in host for h in self.ALL_ACCEPTED_HOSTS)
 
     def _extract_hgcloud_link(self, sb, url: str) -> tuple:
         """
@@ -260,7 +270,7 @@ class DownloadExtractor:
     def _find_wecima_download_links(self, html: str) -> list:
         """
         Find download links from wecima.cx page.
-        Only returns links from supported hosts (dhcplay, hgcloud, etc.)
+        Returns links from all accepted hosts.
         """
         soup = BeautifulSoup(html, 'html.parser')
         links = []
@@ -276,9 +286,8 @@ class DownloadExtractor:
             if not decoded_url:
                 continue
             
-            # Only include supported hosts
-            if not self._is_supported_host(decoded_url):
-                continue
+            # Accept all hosts (not just supported ones)
+            # We'll still try to get direct links for supported hosts
             
             resolution = ""
             size = ""
@@ -301,7 +310,8 @@ class DownloadExtractor:
                 'resolution': resolution,
                 'size': size,
                 'quality_type': quality_type,
-                'quality_label': f"{resolution} {quality_type}".strip() if resolution else quality_type
+                'quality_label': f"{resolution} {quality_type}".strip() if resolution else quality_type,
+                'can_extract_direct': self._is_supported_host(decoded_url)
             })
         
         return links
@@ -368,8 +378,9 @@ class DownloadExtractor:
                     host = urlparse(dl['url']).netloc or "unknown"
                     quality = dl.get('quality_label') or dl.get('resolution')
                     intermediate_url = dl['url']
+                    can_extract = dl.get('can_extract_direct', False)
                     
-                    if get_direct_links:
+                    if get_direct_links and can_extract:
                         logger.info(f"[WECIMA] Processing {host} for direct link...")
                         try:
                             final_link, is_direct = self._extract_hgcloud_link(sb, intermediate_url)
@@ -393,6 +404,7 @@ class DownloadExtractor:
                                 is_direct=False
                             ))
                     else:
+                        # For non-extractable hosts, just add the link as-is
                         download_links.append(DownloadLink(
                             host=host,
                             quality=quality,
