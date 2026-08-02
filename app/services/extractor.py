@@ -807,6 +807,9 @@ class DownloadExtractor:
                 url=url
             )
         
+        # Priority hosts that we can extract direct links from (in order of preference)
+        PRIORITY_HOSTS = ['dhcplay', 'hgcloud', 'audinifer', 'hanerix', 'premilkyway']
+        
         try:
             with SB(uc=True, headless=True) as sb:
                 logger.info(f"[WECIMA] Loading: {url}")
@@ -837,9 +840,28 @@ class DownloadExtractor:
                     watch_servers = self._find_wecima_watch_servers(html)
                     logger.info(f"[WECIMA] Found {len(watch_servers)} watch servers")
                 
-                # Apply limit
-                if limit and len(wecima_downloads) > limit:
-                    wecima_downloads = wecima_downloads[:limit]
+                # Smart prioritization: put priority hosts first
+                if get_direct_links and wecima_downloads:
+                    priority_links = []
+                    other_links = []
+                    
+                    for dl in wecima_downloads:
+                        host = urlparse(dl['url']).netloc.lower()
+                        is_priority = any(ph in host for ph in PRIORITY_HOSTS)
+                        if is_priority:
+                            priority_links.append(dl)
+                        else:
+                            other_links.append(dl)
+                    
+                    # Reorder: priority hosts first, then others
+                    wecima_downloads = priority_links + other_links
+                    logger.info(f"[WECIMA] Prioritized {len(priority_links)} working hosts")
+                
+                # Apply limit (default 3 for direct links to save time)
+                effective_limit = limit if limit else (3 if get_direct_links else 10)
+                if len(wecima_downloads) > effective_limit:
+                    wecima_downloads = wecima_downloads[:effective_limit]
+                    logger.info(f"[WECIMA] Limited to {effective_limit} links for processing")
                 
                 # Convert to DownloadLink objects
                 download_links = []

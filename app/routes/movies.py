@@ -344,9 +344,10 @@ async def process_single_movie(url: str, admin_id: str, auto_extract: bool = Tru
             extractor = DownloadExtractor()
             if is_wecima_url(url):
                 # Use extract_wecima with get_direct_links=True to get actual CDN links
-                return extractor.extract_wecima(url, limit=10, get_direct_links=auto_extract)
+                # Limit to 3 links with priority hosts (dhcplay, hgcloud) for faster processing
+                return extractor.extract_wecima(url, limit=3, get_direct_links=auto_extract)
             else:
-                return extractor.extract(url, limit=10)
+                return extractor.extract(url, limit=3)
         
         loop = asyncio.get_event_loop()
         executor = ThreadPoolExecutor(max_workers=1)
@@ -514,4 +515,55 @@ async def list_bulk_jobs(
     """List all bulk jobs. Admin only."""
     return {
         "jobs": list(bulk_jobs.values())
+    }
+
+
+class BulkDeleteRequest(BaseModel):
+    """Request body for bulk delete."""
+    movie_ids: List[str]
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_movies(
+    data: BulkDeleteRequest,
+    admin: dict = Depends(get_current_admin),
+):
+    """
+    Bulk delete movies by IDs.
+    Admin only.
+    """
+    db = get_database()
+    
+    if not data.movie_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No movie IDs provided"
+        )
+    
+    if len(data.movie_ids) > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Maximum 100 movies can be deleted at once"
+        )
+    
+    # Convert to ObjectIds
+    oids = []
+    for movie_id in data.movie_ids:
+        try:
+            oids.append(ObjectId(movie_id))
+        except:
+            pass  # Skip invalid IDs
+    
+    if not oids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No valid movie IDs provided"
+        )
+    
+    # Delete all movies
+    result = await db.movies.delete_many({"_id": {"$in": oids}})
+    
+    return {
+        "message": f"Deleted {result.deleted_count} movies",
+        "deleted_count": result.deleted_count
     }
