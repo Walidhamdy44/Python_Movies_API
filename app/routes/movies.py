@@ -523,6 +523,11 @@ class BulkDeleteRequest(BaseModel):
     movie_ids: List[str]
 
 
+class RefreshLinkRequest(BaseModel):
+    """Request body for refreshing a download link."""
+    link_index: int  # Index of the link in download_links array
+
+
 @router.post("/bulk-delete")
 async def bulk_delete_movies(
     data: BulkDeleteRequest,
@@ -567,3 +572,92 @@ async def bulk_delete_movies(
         "message": f"Deleted {result.deleted_count} movies",
         "deleted_count": result.deleted_count
     }
+
+
+@router.post("/{movie_id}/refresh-link")
+async def refresh_movie_link(
+    movie_id: str,
+    data: RefreshLinkRequest,
+    admin: dict = Depends(get_current_admin),
+):
+    """
+    Refresh an expired direct link by re-extracting from the host URL.
+    Admin only.
+    
+    The CDN links (like cdn-centaurus.com) expire after ~24-48 hours.
+    This endpoint re-extracts a fresh link from the permanent host URL.
+    """
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    from app.services import DownloadExtractor
+    
+    db = get_database()
+    
+    try:
+        oid = ObjectId(movie_id)
+    except:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid movie ID"
+        )
+    
+    movie = await db.movies.find_one({"_id": oid})
+    
+    if not movie:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Movie not found"
+        )
+    
+    download_links = movie.get("download_links", [])
+    
+    if not download_links:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Movie has no download links"
+        )
+    
+    if data.link_index < 0 or data.link_index >= len(download_links):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid link index. Movie has {len(download_links)} links (0-{len(download_links)-1})"
+        )
+    
+    link = download_links[data.link_index]
+    host_url = link.get("host_url")
+    
+    # For old data: if no host_url but is_direct=False, the direct_link IS the host URL
+    if not host_url and not link.get("is_direct", False):
+        host_url = link.get("direct_link")
+    
+    if not host_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Link has no host_url stored for refresh"
+        )
+    
+    # Run refresh in thread pool
+    def run_refresh():
+        extractor = DownloadExtractor()
+        return extractor.refresh_direct_link(host_url)
+    
+    loop = asyncio.get_event_loop()
+    executor = ThreadPoolExecutor(max_workers=1)
+    direct_link, is_direct, extracted_at = await loop.run_in_executor(executor, run_refresh)
+    
+    # Update the specific link in the array
+    download_links[data.link_index]["direct_link"] = direct_link
+    download_links[data.link_index]["is_direct"] = is_direct
+    download_links[data.link_index]["host_url"] = host_url  # Save host_url for future refreshes
+    if extracted_at:
+        download_links[data.link_index]["extracted_at"] = extracted_at
+    
+    # Save to database
+    await db.movies.update_one(
+        {"_id": oid},
+        {"$set": {"download_links": download_links, "updated_at": datetime.utcnow()}}
+    )
+    
+    # Return updated movie
+    movie = await db.movies.find_one({"_id": oid})
+    return serialize_doc(movie)

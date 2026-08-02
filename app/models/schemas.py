@@ -13,8 +13,10 @@ class DownloadLink(BaseModel):
     """Represents a download link from a host."""
     host: str
     quality: Optional[str] = None
-    direct_link: str
+    host_url: Optional[str] = None  # Permanent intermediate URL (e.g., hgcloud.to/xxx) - used for refresh
+    direct_link: str  # CDN link (may expire)
     is_direct: bool
+    extracted_at: Optional[str] = None  # Timestamp when direct link was extracted
 
 
 class MovieInfo(BaseModel):

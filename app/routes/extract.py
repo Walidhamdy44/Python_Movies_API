@@ -232,3 +232,4 @@ async def extract_wecima_info_only(
         raise HTTPException(status_code=500, detail=result.message)
     
     return result
+
